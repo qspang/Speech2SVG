@@ -1,0 +1,35 @@
+# Git 备份与恢复指南
+
+在进行任何尝试性的界面与特效重构前，请在终端（Terminal）中顺序运行以下命令进行存档。
+
+## 1. 备份当前状态 (存档)
+
+请复制以下命令并在你的终端中运行：
+
+```bash
+# 1. 进入代码目录
+cd /home/ubuntu/sysu/svgagent/video_enhance
+
+# 2. 初始化 git 仓库（如果尚未初始化）
+git init
+
+# 3. 将所有文件添加到暂存区
+git add .
+
+# 4. 提交一个名为 "backup-before-cinematic-ui" 的存档
+git commit -m "backup-before-cinematic-ui"
+```
+
+---
+
+## 2. 恢复命令（如果后续效果不好，用来撤销我的修改）
+
+只有在你想放弃我之后的修改时，才运行这几条命令：
+
+```bash
+# 放弃所有未提交的工作区修改，强制退回
+git reset --hard HEAD
+
+# 清除任何新产生但未跟进 (untracked) 的冗余文件
+git clean -fd
+```
