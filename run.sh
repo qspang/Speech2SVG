@@ -31,7 +31,8 @@ conda activate svg
 #     "$@"
 
 python video_enhancer.py /home/ubuntu/sysu/svgagent/video/futureai.mp4 \
-    --llm gemini-3.1-pro-low \
-    --vision-llm gemini-3.1-pro-low \
-    --max-workers 1 \
+    --llm gemini-3.1-pro-high \
+    --vision-llm gemini-3.1-pro-high \
+    --svg-mode simple \
+    --max-workers 5 \
     "$@"

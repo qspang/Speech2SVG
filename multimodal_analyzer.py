@@ -32,7 +32,7 @@ class MultimodalAnalyzer:
         output_dir: str = None,
         llm_type: str = None,
         vision_llm_type: str = None,
-        enable_complex_mode: bool = False,
+        svg_mode: str = "simple",
         max_workers: int = 1
     ):
         """初始化分析器"""
@@ -43,7 +43,7 @@ class MultimodalAnalyzer:
         # LLM配置
         self.llm_type = llm_type or "claude-sonnet-4-5-20250929"
         self.vision_llm_type = vision_llm_type or "claude-sonnet-4-5-20250929"
-        self.enable_complex_mode = enable_complex_mode
+        self.svg_mode = svg_mode
         self.max_workers = max(1, max_workers)
         
         # 文件路径
@@ -58,13 +58,13 @@ class MultimodalAnalyzer:
             self.llm_type, 
             self.vision_llm_type, 
             self.output_dir,
-            enable_complex_mode=self.enable_complex_mode,
+            svg_mode=self.svg_mode,
             max_workers=self.max_workers
         )
         
         print(f"✓ MultimodalAnalyzer initialized")
         print(f"  Output dir: {self.output_dir}")
-        print(f"  SVG mode: {'Complex' if self.enable_complex_mode else 'Simple'}")
+        print(f"  SVG mode: {self.svg_mode.capitalize()}")
     
     # ========== Phase 1 & 2: Whisper + 语义聚合 ==========
     

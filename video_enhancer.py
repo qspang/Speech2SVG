@@ -21,7 +21,7 @@ class VideoEnhancer:
         output_base_dir: str = "../enhanced_videos",
         llm_type: str = "claude-sonnet-4-5-20250929",
         vision_llm_type: str = "claude-sonnet-4-5-20250929",
-        enable_complex_mode: bool = False,
+        svg_mode: str = "simple",
         max_workers: int = 1
     ):
         """
@@ -32,14 +32,14 @@ class VideoEnhancer:
             output_base_dir: 输出基础目录
             llm_type: 文本LLM类型（用于文本分类、内容生成等）
             vision_llm_type: 视觉LLM类型（用于图像分析、SVG评审等）
-            enable_complex_mode: 启用复杂模式（默认False=简单模式）
+            svg_mode: SVG生成模式（simple, normal, complex）
             max_workers: 内容生成并发数（默认1=串行）
         """
         self.video_path = video_path
         self.output_base_dir = output_base_dir
         self.llm_type = llm_type
         self.vision_llm_type = vision_llm_type
-        self.enable_complex_mode = enable_complex_mode
+        self.svg_mode = svg_mode
         self.max_workers = max(1, max_workers)
         
         # 创建输出目录（不使用时间戳）
@@ -55,7 +55,7 @@ class VideoEnhancer:
         print(f"  Output: {self.output_dir}")
         print(f"  LLM: {llm_type}")
         print(f"  Vision LLM: {vision_llm_type}")
-        print(f"  SVG Generation Mode: {'Complex' if enable_complex_mode else 'Simple'}")
+        print(f"  SVG Generation Mode: {svg_mode.capitalize()}")
         print(f"  Max Workers: {self.max_workers}")
     
     def process(self, force_reprocess: bool = False) -> str:
@@ -84,7 +84,7 @@ class VideoEnhancer:
             output_dir=self.temp_dir,
             llm_type=self.llm_type,
             vision_llm_type=self.vision_llm_type,
-            enable_complex_mode=self.enable_complex_mode,
+            svg_mode=self.svg_mode,
             max_workers=self.max_workers
         )
         
@@ -136,16 +136,8 @@ class VideoEnhancer:
     
     def _finalize_html(self, html_path: str):
         """最终确认: 复制assets到输出目录"""
-        # 复制assets
-        temp_assets = os.path.join(self.temp_dir, "assets")
-        output_assets = os.path.join(self.output_dir, "assets")
-        
-        if os.path.exists(temp_assets):
-            if os.path.exists(output_assets):
-                shutil.rmtree(output_assets)
-            shutil.copytree(temp_assets, output_assets)
-            print(f"  > Copied assets to output directory")
-        
+        print(f"  > Finalized assets path mappings")
+
         print(f"  > Finalized: {html_path}")
 
 
@@ -161,8 +153,8 @@ def main():
                         default='claude-sonnet-4-5-20250929', help='LLM type for text processing')
     parser.add_argument('--vision-llm', '--vision-llm-type', dest='vision_llm_type',
                         default='claude-sonnet-4-5-20250929', help='Vision LLM type for image analysis')
-    parser.add_argument('--complex', action='store_true', dest='enable_complex_mode',
-                        help='Enable complex SVG mode (default: normal mode via svg_common)')
+    parser.add_argument('--svg-mode', dest='svg_mode', choices=['simple', 'normal', 'complex'], default='simple',
+                        help='SVG Generation mode (default: simple)')
     parser.add_argument('--max-workers', type=int, default=1, dest='max_workers',
                         help='Max concurrent workers for content generation (default: 1 = sequential)')
     
@@ -178,7 +170,7 @@ def main():
         output_base_dir=args.output_base_dir,
         llm_type=args.llm_type,
         vision_llm_type=args.vision_llm_type,
-        enable_complex_mode=args.enable_complex_mode,
+        svg_mode=args.svg_mode,
         max_workers=args.max_workers
     )
     

@@ -55,7 +55,10 @@ class SVGGenerator:
 
         system_prompt = self._build_system_prompt(brief)
         user_prompt = self._build_user_prompt(brief)
-
+        print("svg generator system prompt:",system_prompt)
+        print("==========================================")
+        print("svg generator user prompt:",user_prompt )
+        print("==========================================")
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
@@ -108,7 +111,10 @@ Canvas: {CANVAS_WIDTH}x{CANVAS_HEIGHT} pixels. Output RAW SVG code only — no m
 - Center: (960, 540)
 - Start SVG with:
   <svg viewBox="0 0 {CANVAS_WIDTH} {CANVAS_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-  <rect width="{CANVAS_WIDTH}" height="{CANVAS_HEIGHT}" rx="20" fill="{bg}" opacity="{bg_opacity}"/>
+- ⚠ CRITICAL: DO NOT DRAW ANY BACKGROUND <rect>. The SVG must be completely TRANSPARENT so it acts as an overlay on the video.
+- ⚠ CRITICAL: DO NOT use solid black/dark boxes. Rely on glowing strokes, bold text, and transparent gradients to create a cinematic holographic effect.
+- You can include a glowing filter in <defs> to make elements pop on video:
+  <defs><filter id="glow"><feGaussianBlur stdDeviation="8" result="blur" /><feComposite in="SourceGraphic" in2="blur" operator="over"/></filter></defs>
 
 ═══ ⚠ CRITICAL FULL-CANVAS LAYOUT RULE ═══
 You MUST spread content across the ENTIRE 1920×1080 canvas. NEVER cluster everything in one corner.
@@ -122,13 +128,14 @@ You MUST spread content across the ENTIRE 1920×1080 canvas. NEVER cluster every
 - RIGHT: elements span from x=200 to x=1700 with balanced spacing
 
 ═══ MINIMUM SIZE RULES (1920×1080 canvas) ═══
-- Title text: font-size >= 42px, font-weight >= 600
-- Subtitle text: font-size >= 20px
-- Body text / labels: font-size >= 16px (NEVER use 12px or 10px — too small!)
-- Entity icons: minimum 80×80px bounding box
-- Cards / boxes: minimum width 320px, minimum height 80px
-- Central element (e.g. VS circle): minimum radius 50px or 100×100px
-- Header boxes: minimum width 380px, height 80px"""
+⚠ VERY IMPORTANT: The SVG will be scaled down when overlaid on the video. ALL TEXT MUST BE MASSIVE.
+- Title text: font-size >= 60px, font-weight >= 800
+- Subtitle text: font-size >= 45px
+- Body text / labels / data values: font-size >= 32px (NEVER use 16px, 12px or 10px — they will be invisible!)
+- Entity icons: minimum 120×120px bounding box
+- Cards / boxes: minimum width 400px, minimum height 120px
+- Central element (e.g. VS circle): minimum radius 80px or 150×150px
+- Stroke widths: minimum 3px to 5px (thin 1px lines will disappear)"""
 
         # ── Type-specific template ────────────────────────────────
         type_templates = {
@@ -525,8 +532,7 @@ ANIMATION: {animation_plan}
 {type_content}
 {warn_text}
 
-Background: <rect width="{CANVAS_WIDTH}" height="{CANVAS_HEIGHT}" rx="20"
-                  fill="{bg}" opacity="{bg_opacity}"/>
+Background: NONE. This is a holographic overlay on a video. Ensure regions outside elements are fully transparent.
 
 ⚠ LAYOUT REMINDER: Use the FULL 1920×1080 canvas. Title near x=960. Spread entities from x=200 to x=1700, y=150 to y=950. Do NOT cluster in one corner.
 

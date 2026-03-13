@@ -1,0 +1,62 @@
+
+[Step 1/3] Visual Strategy — context distillation + alignment
+==========================================
+{'width': 640, 'height': 360, 'position': 'bottom-left', 'region_context': {'region_bg_color': '#010101', 'region_brightness': 'dark', 'region_brightness_value': 7.6, 'region_colors': ['#010101', '#0a0a0a', '#a6a5a9'], 'region_type': 'gradient', 'region_edge_density': 0.003, 'recommended_svg_opacity': 0.6, 'contrast_text_color': '#ffffff'}}
+==========================================
+{'is_single_scene': True, 'color_hierarchy': {'background_color': '#070708', 'accent_color': '#7f594d', 'text_color': '#ffffff', 'all_colors': ['#070708', '#0d0d0d', '#020202', '#151515', '#201d1e', '#7f594d', '#a57464', '#573c36'], 'color_weights': [0.3921777777777778, 0.21911111111111112, 0.1628888888888889, 0.11213333333333333, 0.066, 0.019866666666666668, 0.014666666666666666, 0.013155555555555556]}, 'color_metrics': {'saturation': 0.08539666167392883, 'saturation_level': 'muted', 'brightness': 15.516149209104938, 'brightness_level': 'dark', 'temperature': 'neutral'}, 'visual_complexity': 'minimal', 'design_guide': {'art_style_name': 'Obsidian Holographic', 'visual_metaphor': 'Crystalline data fragments suspended in deep void space', 'svg_prompt': 'Ultra-thin 1px stroke geometric lattice lines; delicate hexagonal and rectangular frame elements; subtle outer glow effects using the accent color at 15-20% opacity; sharp corner brackets and targeting reticles at frame edges; isometric perspective grid lines suggesting spatial depth; transparent background with no solid fills; occasional floating dot matrices', 'text_style': 'Monospaced font family (SF Mono, Roboto Mono, or Consolas), font-weight 300-400 (Light/Regular), all-caps for data labels and metrics, letter-spacing 0.15em, color #e0e0e0 (soft white), subtle text-shadow with accent color at 20% blur radius', 'recommended_bg': '#030303', 'recommended_accent': '#b8956a', 'recommended_secondary': '#7f594d', 'svg_bg_opacity': 0.6}, 'frame_count': 7, 'color_palette': ['#070708', '#0d0d0d', '#020202', '#151515', '#201d1e'], 'style_keywords': ['minimal', 'muted'], 'design_prompt': {'art_style_name': 'Obsidian Holographic', 'visual_metaphor': 'Crystalline data fragments suspended in deep void space', 'svg_prompt': 'Ultra-thin 1px stroke geometric lattice lines; delicate hexagonal and rectangular frame elements; subtle outer glow effects using the accent color at 15-20% opacity; sharp corner brackets and targeting reticles at frame edges; isometric perspective grid lines suggesting spatial depth; transparent background with no solid fills; occasional floating dot matrices', 'text_style': 'Monospaced font family (SF Mono, Roboto Mono, or Consolas), font-weight 300-400 (Light/Regular), all-caps for data labels and metrics, letter-spacing 0.15em, color #e0e0e0 (soft white), subtle text-shadow with accent color at 20% blur radius', 'recommended_bg': '#030303', 'recommended_accent': '#b8956a', 'recommended_secondary': '#7f594d', 'svg_bg_opacity': 0.6}}
+==========================================
+==========================================
+Create a design brief for this SVG overlay.
+
+{
+  "scene_config": {
+    "is_single_scene": true,
+    "frame_count": 7,
+    "visual_complexity": "minimal",
+    "style_keywords": ["minimal", "muted"]
+  },
+  "color_strategy": {
+    "hierarchy": {
+      "background_color": "#070708",
+      "accent_color": "#7f594d",
+      "text_color": "#ffffff"
+    },
+    "metrics": {
+      "saturation_level": "muted",
+      "brightness_level": "dark",
+      "temperature": "neutral",
+      "saturation": 0.0854,
+      "brightness": 15.516
+    },
+    "full_palette": ["#070708", "#0d0d0d", "#020202", "#151515", "#201d1e", "#7f594d", "#a57464", "#573c36"]
+  },
+  "design_guide": {
+    "art_style_name": "Obsidian Holographic",
+    "visual_metaphor": "Crystalline data fragments suspended in deep void space",
+    "svg_elements": {
+      "stroke": "Ultra-thin 1px geometric lattice lines",
+      "shapes": ["delicate hexagonal", "rectangular frame elements"],
+      "effects": "subtle outer glow (15-20% opacity) using accent color",
+      "details": ["sharp corner brackets", "targeting reticles", "floating dot matrices"],
+      "perspective": "isometric grid lines for spatial depth",
+      "background": "transparent with no solid fills"
+    },
+    "typography": {
+      "font_family": "SF Mono, Roboto Mono, or Consolas",
+      "font_weight": "300-400 (Light/Regular)",
+      "case": "ALL-CAPS",
+      "letter_spacing": "0.15em",
+      "color": "#e0e0e0",
+      "text_shadow": "accent color with 20% blur radius"
+    }
+  },
+  "prompts": {
+    "svg_generation": "Ultra-thin 1px stroke geometric lattice lines; delicate hexagonal and rectangular frame elements; subtle outer glow effects using the accent color at 15-20% opacity; sharp corner brackets and targeting reticles at frame edges; isometric perspective grid lines suggesting spatial depth; transparent background with no solid fills; occasional floating dot matrices",
+    "recommended_defaults": {
+      "bg": "#030303",
+      "accent": "#b8956a",
+      "secondary": "#7f594d",
+      "svg_opacity": 0.6
+    }
+  }
+}

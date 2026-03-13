@@ -41,7 +41,7 @@ def create_fallback_svg(topic: str, scene_info: Dict, svg_dir: str, idx: int, ti
     
     return {
         'type': 'svg',
-        'path': f'assets/svg/{filename}',
+        'path': f'temp_analysis/assets/svg/{filename}',
         'svg_content': svg
     }
 

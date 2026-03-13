@@ -21,12 +21,12 @@ class ContentAgent:
     """内容生成Agent - 协调SVG和文字生成（支持并发）"""
     
     def __init__(self, llm_type: str, vision_llm_type: str, output_dir: str,
-                 enable_complex_mode: bool = False, max_workers: int = 1):
+                 svg_mode: str = "simple", max_workers: int = 1):
         """初始化"""
         self.llm_type = llm_type
         self.vision_llm_type = vision_llm_type
         self.output_dir = output_dir
-        self.enable_complex_mode = enable_complex_mode
+        self.svg_mode = svg_mode
         self.max_workers = max(1, max_workers)
         
         # 初始化TextAgent
@@ -123,7 +123,7 @@ class ContentAgent:
         elif point['content_type'] == 'text_card':
             content = self._generate_text_content(point, idx)
             point['content'] = content
-            print(f"    [{idx+1}] Text: {content['title']}")
+            print(f"    [{idx+1}] Text: {content.get('hero_text', 'No Text')}")
     
     def _generate_svg_content(self, point: Dict, idx: int) -> Dict:
         """生成SVG内容"""
@@ -134,11 +134,13 @@ class ContentAgent:
         
         try:
             import sys
-            # Mode routing: normal mode → svg_common, complex mode → svg_agent
-            if self.enable_complex_mode:
+            # Mode routing
+            if getattr(self, 'svg_mode', 'simple') == 'complex':
                 svg_module_path = os.path.join(os.path.dirname(__file__), 'svg_agent')
-            else:
+            elif getattr(self, 'svg_mode', 'simple') == 'normal':
                 svg_module_path = os.path.join(os.path.dirname(__file__), 'svg_common')
+            else:
+                svg_module_path = os.path.join(os.path.dirname(__file__), 'svg_simple')
             sys.path.insert(0, svg_module_path)
             from main import generate_svg_from_text
             
@@ -167,7 +169,7 @@ class ContentAgent:
                         svg_content = f.read()
                     return {
                         'type': 'svg',
-                        'path': f'assets/svg/{filename}',
+                        'path': f'temp_analysis/assets/svg/{filename}',
                         'svg_content': svg_content
                     }
                 except Exception as e:
@@ -182,7 +184,7 @@ class ContentAgent:
                 vision_llm_type=self.vision_llm_type,
                 layout_context=layout_context,
                 scene_context=scene_info,
-                enable_complex_mode=self.enable_complex_mode,
+                enable_complex_mode=(getattr(self, 'svg_mode', 'simple') == 'complex'),
                 sample_id=actual_sample_id,
                 visual_description=point.get('visual_description', ''),
             )
@@ -203,7 +205,7 @@ class ContentAgent:
                 
                 return {
                     'type': 'svg',
-                    'path': f'assets/svg/{filename}',
+                    'path': f'temp_analysis/assets/svg/{filename}',
                     'svg_content': svg_content
                 }
             
@@ -271,7 +273,7 @@ class ContentAgent:
         
         return {
             'type': 'svg',
-            'path': f'assets/svg/{filename}',
+            'path': f'temp_analysis/assets/svg/{filename}',
             'svg_content': svg
         }
     

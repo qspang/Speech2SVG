@@ -198,8 +198,19 @@ class HTMLGenerator:
                     <span class="video-time" id="videoTimeDisplay">00:00 / 00:00</span>
                 </div>
             </div>
+        </div>
 
-            <!-- SVG Gallery Section -->
+        <!-- Right Panel: Subtitles (Top) & Gallery (Bottom) -->
+        <div class="right-panel">
+            <div class="subtitle-header">
+                <h3>📝 字幕时间线</h3>
+                <span class="subtitle-count">{len(transcript_data)} 条字幕</span>
+            </div>
+            <div class="subtitle-list" id="subtitleList">
+{subtitle_entries_html}
+            </div>
+            
+            <!-- SVG Gallery Section (Moved from left to bottom-right) -->
             <div class="gallery-section">
                 <div class="gallery-header">
                     <h3>📊 增强内容画廊</h3>
@@ -212,17 +223,6 @@ class HTMLGenerator:
                     <p>⏳ 等待内容生成中...</p>
                     <p class="hint">生成的SVG动画和文字卡片将显示在此处</p>
                 </div>
-            </div>
-        </div>
-
-        <!-- Right Panel: Subtitles -->
-        <div class="right-panel">
-            <div class="subtitle-header">
-                <h3>📝 字幕时间线</h3>
-                <span class="subtitle-count">{len(transcript_data)} 条字幕</span>
-            </div>
-            <div class="subtitle-list" id="subtitleList">
-{subtitle_entries_html}
             </div>
         </div>
     </div>
@@ -285,9 +285,11 @@ class HTMLGenerator:
             height = layout.get('height', 250)
             left_pct = x / self.LAYOUT_CANVAS_W * 100
             top_pct = y / self.LAYOUT_CANVAS_H * 100
-            w_pct = max(width / self.LAYOUT_CANVAS_W * 100, 15.0)  # 文字框不能太窄
-            h_pct_max = max(height / self.LAYOUT_CANVAS_H * 100 * 2.5, 40.0) # 允许向下舒展
-            style = f'left: {left_pct:.2f}%; top: {top_pct:.2f}%; width: {w_pct:.2f}%; height: auto; max-height: {h_pct_max:.2f}%; min-height: 10%;'
+            
+            # 使用 width: max-content 让卡片大小自适应文字长短，但使用 max-width 防止超出边界
+            w_pct = max(width / self.LAYOUT_CANVAS_W * 100, 25.0)  # 至少给 25% 宽度让文字呼吸
+            h_pct_max = max(height / self.LAYOUT_CANVAS_H * 100 * 2.5, 45.0) 
+            style = f'left: {left_pct:.2f}%; top: {top_pct:.2f}%; width: max-content; max-width: {w_pct:.2f}%; height: auto; max-height: {h_pct_max:.2f}%; min-height: 5%;'
 
         content_html = self._generate_content_html(content, point)
         container_class = "enhancement-container"
@@ -364,55 +366,26 @@ class HTMLGenerator:
                 return '<div class="placeholder">SVG Content</div>'
 
         elif content_type == 'text':
-            title = content.get('title', '')
-            body = content.get('body', '')
-            card_type = content.get('card_type', 'note')
+            label = content.get('label', '[ 💬 Note ]')
+            hero_text = content.get('hero_text', '')
+            explanation = content.get('explanation', '')
             style_dict = content.get('style', {})
 
-            if not title and not body:
+            if not hero_text and not explanation:
                 text = point.get('text', '')
-                return f'<div class="text-content glassmorphism"><style>.card-body{{overflow-y: auto; height: 100%;}}</style><div class="card-body"><p>{text}</p></div></div>'
-
-            use_glass = content.get('use_glassmorphism', True)
-            css_class = 'glassmorphism' if use_glass else 'theme-default'
+                return f'<div class="text-content premium-glassmorphism"><div class="card-hero">{text}</div></div>'
             
-            # Map style keys to CSS
-            inline_styles = []
-            if style_dict:
-                if 'background' in style_dict:
-                    inline_styles.append(f"background: {style_dict['background']}")
-                if 'border_radius' in style_dict:
-                    inline_styles.append(f"border-radius: {style_dict['border_radius']}")
-                if 'padding' in style_dict:
-                    inline_styles.append(f"padding: {style_dict['padding']}")
-                if 'border' in style_dict:
-                    inline_styles.append(f"border: {style_dict['border']}")
-                if 'border_left' in style_dict:
-                    inline_styles.append(f"border-left: {style_dict['border_left']}")
+            # CSS inline variables for dynamic accent coloring
+            accent_color = style_dict.get('accent_color', '#00f3ff')
+            style_attr = f'style="--card-accent: {accent_color};"'
 
-            style_attr = f'style="{"; ".join(inline_styles)}"' if inline_styles else ''
-
-            title_style = []
-            if 'title_color' in style_dict:
-                title_style.append(f"color: {style_dict['title_color']}")
-            if 'title_size' in style_dict:
-                title_style.append(f"font-size: {style_dict['title_size']}")
-            title_attr = f'style="{"; ".join(title_style)}"' if title_style else ''
-
-            body_style = []
-            if 'body_color' in style_dict:
-                body_style.append(f"color: {style_dict['body_color']}")
-            if 'body_size' in style_dict:
-                body_style.append(f"font-size: {style_dict['body_size']}")
-            if 'body_line_height' in style_dict:
-                body_style.append(f"line-height: {style_dict['body_line_height']}")
-            body_attr = f'style="{"; ".join(body_style)}"' if body_style else ''
-
-            result = f'<div class="text-content {css_class} card-{card_type}" {style_attr}>'
-            if title:
-                result += f'<h3 class="card-title" {title_attr}>{title}</h3>'
-            if body:
-                result += f'<div class="card-body" {body_attr}>{body}</div>'
+            result = f'<div class="text-content premium-glassmorphism" {style_attr}>'
+            if label:
+                result += f'<div class="card-label">{label}</div>'
+            if hero_text:
+                result += f'<h3 class="card-hero">{hero_text}</h3>'
+            if explanation:
+                result += f'<div class="card-explanation">{explanation}</div>'
             result += '</div>'
             return result
 
@@ -649,15 +622,16 @@ class HTMLGenerator:
         }
 
         .left-panel {
-            width: 58%;
+            width: 66.66%;
             display: flex;
             flex-direction: column;
             border-right: 1px solid var(--border);
             min-width: 0;
+            background: #000;
         }
 
         .right-panel {
-            width: 42%;
+            width: 33.33%;
             display: flex;
             flex-direction: column;
             min-width: 0;
@@ -710,6 +684,9 @@ class HTMLGenerator:
             display: flex;
             align-items: center;
             justify-content: center;
+            /* In-Video Cinematic Effect: blend with background */
+            mix-blend-mode: screen; 
+            filter: drop-shadow(0 0 20px rgba(0,0,0,0.5));
         }
 
         .svg-wrapper {
@@ -733,37 +710,62 @@ class HTMLGenerator:
             object-fit: contain;
         }
 
-        /* Glassmorphism & Theme */
-        .glassmorphism {
-            background: rgba(255, 255, 255, 0.08);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+        /* Glassmorphism & Theme - Premium Minimalist Upgrade */
+        .premium-glassmorphism {
+            background: rgba(10, 10, 15, 0.45);
+            backdrop-filter: blur(35px) saturate(180%);
+            -webkit-backdrop-filter: blur(35px) saturate(180%);
             border: 1px solid rgba(255, 255, 255, 0.15);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            border-radius: 12px;
-            padding: 20px;
+            border-left: 4px solid var(--card-accent, #6366f1);
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255,255,255,0.1);
+            border-radius: 14px;
+            padding: 24px 32px;
             color: #ffffff;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            /* In-Video effect */
+            mix-blend-mode: normal; 
         }
 
         .text-content {
             width: 100%;
             height: auto;
             display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            justify-content: flex-start;
             overflow: hidden;
         }
 
-        .text-content p { font-size: 16px; line-height: 1.6; text-align: left; }
-        .card-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; flex-shrink: 0; }
-        .card-body { font-size: 14px; line-height: 1.6; overflow-y: auto; padding-right: 4px; }
-
-        .theme-tech_dark { background: rgba(5, 5, 16, 0.9); color: #00f3ff; border: 2px solid #00f3ff; border-radius: 10px; padding: 20px; }
-        .theme-nature_bright { background: rgba(240, 255, 240, 0.9); color: #2d5016; border: 2px solid #8bc34a; border-radius: 10px; padding: 20px; }
-        .theme-warm { background: rgba(255, 240, 230, 0.9); color: #8b4513; border: 2px solid #ff8c00; border-radius: 10px; padding: 20px; }
-        .theme-cool { background: rgba(230, 240, 255, 0.9); color: #1e3a5f; border: 2px solid #4682b4; border-radius: 10px; padding: 20px; }
-        .theme-default { background: rgba(0, 0, 0, 0.8); color: #ffffff; border-radius: 10px; padding: 20px; }
+        .card-label { 
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            color: var(--card-accent, #a78bfa);
+            text-transform: uppercase;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 4px 10px;
+            border-radius: 20px;
+            align-self: flex-start;
+            margin-bottom: 4px;
+        }
+        
+        .card-hero { 
+            font-size: 34px; 
+            font-weight: 300; 
+            line-height: 1.3; 
+            letter-spacing: -0.5px;
+            margin: 0; 
+            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            color: #ffffff;
+        }
+        
+        .card-explanation { 
+            font-size: 15px; 
+            line-height: 1.6; 
+            color: rgba(255, 255, 255, 0.75); 
+            margin-top: 4px;
+            font-weight: 400;
+        }
 
         /* Timeline Bar */
         .timeline-bar {
@@ -837,12 +839,12 @@ class HTMLGenerator:
 
         /* ========== Gallery Section ========== */
         .gallery-section {
-            flex: 1;
+            height: 40%;
             display: flex;
             flex-direction: column;
             background: var(--bg-secondary);
             overflow: hidden;
-            min-height: 0;
+            border-top: 1px solid var(--border);
         }
 
         .gallery-header {
@@ -905,7 +907,7 @@ class HTMLGenerator:
         .svg-thumb svg {
             width: 100%;
             height: 100%;
-            object-fit: contain;
+            object-fit: cover;
         }
 
         .text-thumb {
@@ -1475,7 +1477,7 @@ def test_generator():
             'content_type': 'text_card',
             'text': 'Test Text',
             'layout': {'x': 500, 'y': 100, 'width': 300, 'height': 200},
-            'content': {'type': 'text', 'title': 'Test Title', 'body': 'Test body content', 'card_type': 'insight', 'use_glassmorphism': True}
+            'content': {'type': 'text', 'label': '[ ✨ Insight ]', 'hero_text': 'Test Hero', 'explanation': 'Test explanation content', 'use_glassmorphism': True}
         }
     ]
 
