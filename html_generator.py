@@ -517,15 +517,39 @@ class HTMLGenerator:
             hero_text = html_module.escape(content.get('hero_text', ''))
             explanation = html_module.escape(content.get('explanation', ''))
             why_confusing = html_module.escape(content.get('why_confusing', ''))
+            wrong_detail = html_module.escape(content.get('wrong_detail', ''))
+            correct_detail = html_module.escape(content.get('correct_detail', ''))
+            variant = content.get('variant', 'compare')
             accent_color = content.get('style', {}).get('accent_color', '#f59e0b')
+            if variant == 'stacked':
+                board_html = (
+                    f'<div class="misconception-stack">'
+                    f'<div class="misconception-lane wrong-lane"><span class="misconception-tag">易错理解</span>'
+                    f'<div class="misconception-main">{hero_text}</div>'
+                    f'<div class="misconception-detail">{wrong_detail}</div></div>'
+                    f'<div class="misconception-arrow stack-arrow">↓</div>'
+                    f'<div class="misconception-lane correct-lane"><span class="misconception-tag correct">正确理解</span>'
+                    f'<div class="card-explanation">{explanation}</div>'
+                    f'<div class="misconception-detail">{correct_detail}</div></div>'
+                    f'</div>'
+                )
+            else:
+                board_html = (
+                    f'<div class="misconception-board">'
+                    f'<div class="misconception-lane wrong-lane"><span class="misconception-tag">易错理解</span>'
+                    f'<div class="misconception-main">{hero_text}</div>'
+                    f'<div class="misconception-detail">{wrong_detail}</div></div>'
+                    f'<div class="misconception-arrow">→</div>'
+                    f'<div class="misconception-lane correct-lane"><span class="misconception-tag correct">正确理解</span>'
+                    f'<div class="card-explanation">{explanation}</div>'
+                    f'<div class="misconception-detail">{correct_detail}</div></div>'
+                    f'</div>'
+                )
             return (
                 f'<div class="text-content misconception-card premium-glassmorphism" '
                 f'style="--card-accent: {accent_color};">'
                 f'<div class="card-label">{html_module.escape(label)}</div>'
-                f'<div class="misconception-row"><span class="misconception-tag">易错理解</span>'
-                f'<div class="misconception-main">{hero_text}</div></div>'
-                f'<div class="misconception-row"><span class="misconception-tag correct">正确理解</span>'
-                f'<div class="card-explanation">{explanation}</div></div>'
+                f'{board_html}'
                 f'<div class="misconception-why">{why_confusing}</div>'
                 f'</div>'
             )
@@ -534,15 +558,33 @@ class HTMLGenerator:
             title = html_module.escape(content.get('chain_title', 'Mechanism Chain'))
             stages = content.get('stages', [])
             current_focus = int(content.get('current_focus_stage', 0))
+            variant = content.get('variant', 'path')
             stage_html = []
             for idx, stage in enumerate(stages):
-                cls = 'mechanism-stage active' if idx == current_focus else 'mechanism-stage'
-                stage_html.append(f'<div class="{cls}"><span class="stage-index">{idx + 1}</span><span>{html_module.escape(str(stage))}</span></div>')
+                cls = 'mechanism-stage'
+                if idx < current_focus:
+                    cls += ' completed'
+                elif idx == current_focus:
+                    cls += ' active'
+                if variant == 'stacked':
+                    stage_html.append(
+                        f'<div class="{cls} stacked-stage"><span class="stage-index">STEP {idx + 1}</span><span class="mechanism-stage-text">{html_module.escape(str(stage))}</span></div>'
+                    )
+                else:
+                    connector_class = 'mechanism-connector active' if idx < current_focus else 'mechanism-connector'
+                    connector = f'<div class="{connector_class}"><span class="mechanism-connector-line"></span><span class="mechanism-connector-dot"></span></div>' if idx < len(stages) - 1 else ''
+                    stage_html.append(
+                        f'<div class="mechanism-path-segment">'
+                        f'<div class="{cls}"><span class="stage-index">STEP {idx + 1}</span><span class="mechanism-stage-text">{html_module.escape(str(stage))}</span></div>'
+                        f'{connector}'
+                        f'</div>'
+                    )
+            track_class = 'mechanism-stack-track' if variant == 'stacked' else 'mechanism-path-track'
             return (
                 f'<div class="mechanism-chain-card premium-glassmorphism" style="--card-accent: {accent_color};">'
                 f'<div class="card-label">[ ⚙ Mechanism Chain ]</div>'
                 f'<div class="mechanism-title">{title}</div>'
-                f'<div class="mechanism-stage-row">{"".join(stage_html)}</div>'
+                f'<div class="{track_class}">{"".join(stage_html)}</div>'
                 f'</div>'
             )
 
@@ -568,7 +610,10 @@ class HTMLGenerator:
         edges_html = []
         for edge in concept_graph.get('edges', [])[:6]:
             edges_html.append(
-                f'<div class="concept-edge">{html_module.escape(edge.get("source", ""))} → {html_module.escape(edge.get("target", ""))}</div>'
+                f'<div class="concept-edge" data-source="{html_module.escape(edge.get("source", ""))}" data-target="{html_module.escape(edge.get("target", ""))}">'
+                f'<span class="concept-edge-label">{html_module.escape(edge.get("label", edge.get("source", "")) or "linked")}</span>'
+                f'<span class="concept-edge-route">{html_module.escape(edge.get("source", ""))} → {html_module.escape(edge.get("target", ""))}</span>'
+                f'</div>'
             )
 
         return f'''
@@ -978,7 +1023,7 @@ class HTMLGenerator:
         }
         
         .card-hero { 
-            font-size: calc(34px * var(--overlay-scale, 1)); 
+            font-size: calc(17px * var(--overlay-scale, 1)); 
             font-weight: 300; 
             line-height: 1.3; 
             letter-spacing: -0.5px;
@@ -994,7 +1039,8 @@ class HTMLGenerator:
             color: rgba(255, 255, 255, 0.75); 
             margin-top: 4px;
             font-weight: 400;
-            overflow-wrap: anywhere;
+            overflow-wrap: break-word;
+            word-break: normal;
         }
 
         .misconception-card,
@@ -1008,6 +1054,49 @@ class HTMLGenerator:
             display: flex;
             flex-direction: column;
             gap: 6px;
+        }
+
+        .misconception-board {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+            gap: 12px;
+            align-items: stretch;
+        }
+
+        .misconception-lane {
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 14px;
+            padding: 14px;
+            background: rgba(255,255,255,0.04);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .misconception-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .wrong-lane {
+            background: linear-gradient(180deg, rgba(245,158,11,0.14), rgba(245,158,11,0.04));
+        }
+
+        .correct-lane {
+            background: linear-gradient(180deg, rgba(52,211,153,0.14), rgba(52,211,153,0.04));
+        }
+
+        .misconception-arrow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: calc(28px * var(--overlay-scale, 1));
+            color: var(--card-accent, #f59e0b);
+            font-weight: 700;
+            opacity: 0.9;
+            animation: misconceptionShift 1.6s ease-in-out infinite;
         }
 
         .misconception-tag {
@@ -1024,7 +1113,18 @@ class HTMLGenerator:
             font-size: calc(20px * var(--overlay-scale, 1));
             line-height: 1.45;
             color: #fff7ed;
-            overflow-wrap: anywhere;
+            overflow-wrap: break-word;
+            word-break: normal;
+        }
+
+        .misconception-detail {
+            font-size: calc(12px * var(--overlay-scale, 1));
+            line-height: 1.45;
+            color: rgba(255, 255, 255, 0.60);
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
         }
 
         .misconception-why {
@@ -1033,7 +1133,8 @@ class HTMLGenerator:
             color: rgba(255, 255, 255, 0.68);
             padding-top: 6px;
             border-top: 1px solid rgba(255,255,255,0.08);
-            overflow-wrap: anywhere;
+            overflow-wrap: break-word;
+            word-break: normal;
         }
 
         .mechanism-title {
@@ -1042,11 +1143,28 @@ class HTMLGenerator:
             line-height: 1.35;
         }
 
-        .mechanism-stage-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-            gap: 10px;
+        .mechanism-path-track {
+            display: flex;
+            align-items: stretch;
+            gap: 8px;
             margin-top: 10px;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .mechanism-stack-track {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 10px;
+            min-width: 0;
+        }
+
+        .mechanism-path-segment {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            flex: 1 1 0;
         }
 
         .mechanism-stage {
@@ -1060,6 +1178,8 @@ class HTMLGenerator:
             background: rgba(255,255,255,0.05);
             color: rgba(255,255,255,0.82);
             min-width: 0;
+            flex: 1 1 0;
+            animation: mechanismReveal 0.7s ease forwards;
         }
 
         .mechanism-stage.active {
@@ -1067,6 +1187,60 @@ class HTMLGenerator:
             background: rgba(99, 102, 241, 0.18);
             color: #ffffff;
             box-shadow: 0 0 0 1px rgba(99,102,241,0.15) inset;
+        }
+
+        .mechanism-stage.completed {
+            border-color: rgba(34,211,238,0.45);
+            background: rgba(34,211,238,0.10);
+            color: rgba(255,255,255,0.92);
+        }
+
+        .mechanism-stage-text {
+            overflow-wrap: break-word;
+            word-break: normal;
+            line-height: 1.45;
+        }
+
+        .stacked-stage {
+            min-height: auto;
+        }
+
+        .mechanism-connector {
+            width: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .mechanism-connector-line {
+            display: block;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, rgba(34,211,238,0.15), rgba(34,211,238,0.9));
+            transform-origin: left center;
+            animation: mechanismFlow 1.1s ease forwards;
+        }
+
+        .mechanism-connector-dot {
+            position: absolute;
+            right: -1px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #22d3ee;
+            box-shadow: 0 0 18px rgba(34,211,238,0.6);
+        }
+
+        .mechanism-connector.active .mechanism-connector-line {
+            background: linear-gradient(90deg, rgba(34,211,238,0.65), rgba(34,211,238,1));
+            box-shadow: 0 0 14px rgba(34,211,238,0.22);
+        }
+
+        .mechanism-connector.active .mechanism-connector-dot {
+            background: #67e8f9;
+            box-shadow: 0 0 24px rgba(103,232,249,0.75);
         }
 
         .stage-index {
@@ -1386,12 +1560,26 @@ class HTMLGenerator:
             color: var(--text-primary);
             line-height: 1.45;
             margin-bottom: 4px;
+            white-space: normal;
+            overflow-wrap: break-word;
+            word-break: normal;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
 
         .focus-item-sub {
             font-size: 11px;
             color: var(--text-secondary);
             line-height: 1.45;
+            white-space: normal;
+            overflow-wrap: break-word;
+            word-break: normal;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
 
         .concept-graph-section {
@@ -1446,6 +1634,13 @@ class HTMLGenerator:
             border: 1px solid rgba(255,255,255,0.06);
             color: var(--text-secondary);
             transition: all 0.2s ease;
+            opacity: 0.28;
+            transform: scale(0.96);
+        }
+
+        .concept-node.revealed {
+            opacity: 0.75;
+            transform: scale(1);
         }
 
         .concept-node.active {
@@ -1469,6 +1664,58 @@ class HTMLGenerator:
             font-size: 11px;
             color: var(--text-muted);
             overflow-y: auto;
+        }
+
+        .concept-edge {
+            font-size: 12px;
+            color: var(--text-secondary);
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            opacity: 0.22;
+            transform: translateX(-4px);
+            transition: all 0.2s ease;
+        }
+
+        .concept-edge.revealed {
+            opacity: 0.68;
+            transform: translateX(0);
+        }
+
+        .concept-edge.active {
+            border-color: var(--accent-light);
+            background: rgba(99,102,241,0.12);
+            color: var(--text-primary);
+        }
+
+        .concept-edge-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--accent-light);
+        }
+
+        .concept-edge-route {
+            font-size: 12px;
+        }
+
+        @keyframes mechanismReveal {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes mechanismFlow {
+            from { transform: scaleX(0); opacity: 0.4; }
+            to { transform: scaleX(1); opacity: 1; }
+        }
+
+        @keyframes misconceptionShift {
+            0%, 100% { transform: translateX(0); opacity: 0.75; }
+            50% { transform: translateX(4px); opacity: 1; }
         }
 
         /* ========== Subtitle Panel ========== */
@@ -1970,13 +2217,24 @@ class HTMLGenerator:
         function syncConceptGraph(currentTime) {{
             if (!conceptGraphData || !conceptGraphData.timeline_updates) return;
             let activeIds = [];
+            let revealedIds = new Set();
             conceptGraphData.timeline_updates.forEach(update => {{
                 if (currentTime >= update.timestamp) {{
+                    (update.node_ids || []).forEach(id => revealedIds.add(id));
                     activeIds = update.node_ids || [];
                 }}
             }});
             document.querySelectorAll('.concept-node').forEach(node => {{
+                node.classList.toggle('revealed', revealedIds.has(node.dataset.nodeId));
                 node.classList.toggle('active', activeIds.includes(node.dataset.nodeId));
+            }});
+            document.querySelectorAll('.concept-edge').forEach(edge => {{
+                const source = edge.dataset.source;
+                const target = edge.dataset.target;
+                const revealed = revealedIds.has(source) && revealedIds.has(target);
+                const active = activeIds.includes(source) && activeIds.includes(target);
+                edge.classList.toggle('revealed', revealed);
+                edge.classList.toggle('active', active);
             }});
         }}
 
