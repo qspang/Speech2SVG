@@ -63,10 +63,25 @@ class ContentAgent:
         
         print(f"  ✓ Content generation complete")
         return enhancement_points
+
+    def _content_priority(self, point: Dict) -> int:
+        content_type = point.get('content_type')
+        priorities = {
+            'mechanism_chain': 0,
+            'misconception_card': 1,
+            'text_card': 2,
+            'svg_animation': 3,
+        }
+        return priorities.get(content_type, 99)
+
+    def _ordered_points(self, enhancement_points: List[Dict]):
+        indexed_points = list(enumerate(enhancement_points))
+        indexed_points.sort(key=lambda item: (self._content_priority(item[1]), item[0]))
+        return indexed_points
     
     def _generate_sequential(self, enhancement_points, html_generator, html_path):
         """串行生成（max_workers=1 时的原有逻辑）"""
-        for idx, point in enumerate(enhancement_points):
+        for idx, point in self._ordered_points(enhancement_points):
             self._process_single_point(point, idx)
             
             # 增量追加到HTML
@@ -83,31 +98,42 @@ class ContentAgent:
         
         completed_count = 0
         total = len(enhancement_points)
-        
+
+        ordered_points = self._ordered_points(enhancement_points)
+        priority_levels = [0, 1, 2, 3]
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {}
-            for idx, point in enumerate(enhancement_points):
-                if point['content_type'] in ('svg_animation', 'text_card'):
-                    fut = executor.submit(self._process_single_point, point, idx)
-                    futures[fut] = (point, idx)
-            
-            # 收集结果（按完成顺序）并立即带锁追加到 HTML
-            for fut in as_completed(futures):
-                point, idx = futures[fut]
-                try:
-                    fut.result()  # 触发异常
-                    completed_count += 1
-                    print(f"    ✓ [{completed_count}/{total}] Point #{idx} done")
-                    
-                    if html_generator and html_path and 'content' in point:
-                        with html_lock:
-                            try:
-                                html_generator.append_content(html_path, point, idx)
-                            except Exception as e:
-                                print(f"    ⚠ HTML追加失败: {e}")
-                                
-                except Exception as e:
-                    print(f"    ✗ Point #{idx} failed: {e}")
+            for priority in priority_levels:
+                batch = [
+                    (idx, point) for idx, point in ordered_points
+                    if self._content_priority(point) == priority
+                    and point['content_type'] in ('svg_animation', 'text_card', 'misconception_card', 'mechanism_chain')
+                ]
+                if not batch:
+                    continue
+
+                futures = {
+                    executor.submit(self._process_single_point, point, idx): (point, idx)
+                    for idx, point in batch
+                }
+
+                # 每个优先级批次按完成顺序 append，确保 chain 总是最先进入 HTML
+                for fut in as_completed(futures):
+                    point, idx = futures[fut]
+                    try:
+                        fut.result()
+                        completed_count += 1
+                        print(f"    ✓ [{completed_count}/{total}] Point #{idx} done")
+
+                        if html_generator and html_path and 'content' in point:
+                            with html_lock:
+                                try:
+                                    html_generator.append_content(html_path, point, idx)
+                                except Exception as e:
+                                    print(f"    ⚠ HTML追加失败: {e}")
+
+                    except Exception as e:
+                        print(f"    ✗ Point #{idx} failed: {e}")
     
     def _process_single_point(self, point: Dict, idx: int):
         """处理单个增强点（线程安全）"""
@@ -124,6 +150,14 @@ class ContentAgent:
             content = self._generate_text_content(point, idx)
             point['content'] = content
             print(f"    [{idx+1}] Text: {content.get('hero_text', 'No Text')}")
+        elif point['content_type'] == 'misconception_card':
+            content = self._generate_misconception_content(point, idx)
+            point['content'] = content
+            print(f"    [{idx+1}] Misconception: {content.get('hero_text', 'No Text')}")
+        elif point['content_type'] == 'mechanism_chain':
+            content = self._generate_mechanism_chain_content(point, idx)
+            point['content'] = content
+            print(f"    [{idx+1}] Mechanism: {content.get('chain_title', 'No Title')}")
     
     def _generate_svg_content(self, point: Dict, idx: int) -> Dict:
         """生成SVG内容"""
@@ -289,3 +323,21 @@ class ContentAgent:
         )
         
         return text_card
+
+    def _generate_misconception_content(self, point: Dict, idx: int) -> Dict:
+        payload = point.get('metadata', {}).get('misconception_payload') or point.get('misconception_payload') or {}
+        return self.text_agent.generate_misconception_card(
+            point['text'],
+            point.get('scene_info', {}),
+            payload,
+            point.get('layout', {})
+        )
+
+    def _generate_mechanism_chain_content(self, point: Dict, idx: int) -> Dict:
+        payload = point.get('metadata', {}).get('mechanism_payload') or point.get('mechanism_payload') or {}
+        return self.text_agent.generate_mechanism_chain_card(
+            point['text'],
+            point.get('scene_info', {}),
+            payload,
+            point.get('layout', {})
+        )

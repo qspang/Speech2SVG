@@ -67,6 +67,49 @@ class TextAgent:
         except Exception as e:
             print(f"      Text card generation failed: {e}")
             return self._fallback_text_card(transcript, scene_info)
+
+    def generate_misconception_card(
+        self,
+        transcript: str,
+        scene_info: Dict,
+        payload: Dict,
+        layout_info: Dict = None
+    ) -> Dict:
+        if layout_info is None:
+            layout_info = {}
+        style = self._get_card_style('misconception', scene_info, layout_info.get('region_context', {}))
+        style['accent_color'] = '#f59e0b'
+        return {
+            'type': 'misconception',
+            'label': payload.get('display_label', '[ ⚠ Misconception Alert ]'),
+            'hero_text': payload.get('likely_misconception', transcript[:80]),
+            'explanation': payload.get('correct_understanding', transcript),
+            'why_confusing': payload.get('why_confusing', ''),
+            'style': style,
+            'use_glassmorphism': True,
+        }
+
+    def generate_mechanism_chain_card(
+        self,
+        transcript: str,
+        scene_info: Dict,
+        payload: Dict,
+        layout_info: Dict = None
+    ) -> Dict:
+        if layout_info is None:
+            layout_info = {}
+        style = self._get_card_style('mechanism', scene_info, layout_info.get('region_context', {}))
+        style['accent_color'] = style.get('accent_color', '#00f3ff')
+        return {
+            'type': 'mechanism_chain',
+            'chain_title': payload.get('chain_title', transcript[:60]),
+            'stages': payload.get('stages', []),
+            'links': payload.get('links', []),
+            'current_focus_stage': payload.get('current_focus_stage', 0),
+            'visual_hint': payload.get('visual_hint', ''),
+            'style': style,
+            'use_glassmorphism': True,
+        }
     
     def _llm_structure_knowledge(
         self,

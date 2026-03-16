@@ -24,6 +24,7 @@ class DecisionAgent:
         self.output_dir = output_dir
         self.decisions_path = os.path.join(output_dir, "enhancement_decisions.txt")
         self.summary_path = os.path.join(output_dir, "global_summary.txt")
+        self.latest_global_summary = ""
 
     # ================================================================
     #  Main Entry
@@ -43,6 +44,7 @@ class DecisionAgent:
 
         # ── Step 0: Generate / load global summary ──────────────────
         global_summary = self._get_global_summary(segments)
+        self.latest_global_summary = global_summary
         print(f"  > Global summary ready ({len(global_summary)} chars)")
 
         print(f"  > Classifying with visual direction + context window (workers={max_workers})...")
@@ -81,8 +83,10 @@ class DecisionAgent:
         # Sort by time
         decisions = sorted(decisions, key=lambda x: x["start"])
 
-        # Post-processing: rhythm enforcement (relaxed)
+        # Post-processing: rhythm enforcement + density control
         decisions = self._enforce_rhythm(decisions)
+        decisions = self._sparsify_decisions(decisions)
+        decisions = self._densify_decisions(decisions)
 
         # Save
         save_decisions(decisions, self.decisions_path)
@@ -136,7 +140,7 @@ Keep the summary under 300 words. Be specific — mention actual terms and conce
 
             prompt = f"""Here is the full transcript of a video. Summarize it for a visual enhancement system:
 
-{full_text[:8000]}
+{full_text}
 
 Return a structured summary."""
 
@@ -255,14 +259,14 @@ Return a structured summary."""
 
             llm = CustomChatModel(llm_type=self.vision_llm_type, temperature=0.4)
 
-            system_prompt = """You are an imaginative Visual Director for educational video infographics.
+            system_prompt = """You are a selective Visual Director for educational video infographics.
 
 Your mission: Find opportunities to enhance a video using dynamic SVG diagrams or Text cards.
 You are reviewing individual subtitle segments, with CONTEXT from surrounding segments and a video summary.
 
 Core Philosophy:
-Don't just look for literal objects. Look for relationships, flows, structures, and abstract concepts
-that can be mapped to VISUAL METAPHORS. Think like a designer — if you can sketch it, it's worth an SVG.
+Be selective, but do not under-enhance. Choose enhancements when they add structure, emphasis, or clarity beyond plain subtitles.
+Avoid decorative or redundant enhancements, but do not miss clear educational opportunities.
 
 ═══ Classification Criteria ═══
 
@@ -274,25 +278,29 @@ that can be mapped to VISUAL METAPHORS. Think like a designer — if you can ske
    • Cycles — feedback loops, iterative processes, circular dependencies
    • Visual Metaphors — "bottleneck" → funnel, "foundation" → pillars, "bridge" → connector
    
-   Requirement: You should be able to describe a layout with at least 2 interacting visual elements.
+   Requirement: You should be able to describe a layout with at least 3 meaningful interacting visual elements
+   or a genuinely clarifying process/structure that subtitles alone do not convey well.
 
 2. Assign "text" (High-Density Information) if the text contains:
    • Key definitions, formulas, or golden rules worth remembering
    • Specific numbers, metrics, or data points
    • Critical warnings or best practices
    • Important terminology the audience should memorize
+   Requirement: the card should preserve information viewers are likely to miss without reinforcement.
 
 3. Assign "none" ONLY IF:
    • It is purely conversational filler ("let's move on", "as you can see", "right?")
    • It is too fragmented to extract ANY concrete meaning, even with context
    • It is a greeting, farewell, or pure meta-commentary about the presentation itself
+   • It is understandable enough from subtitles alone, even if it is somewhat informative
 
 ═══ Important Notes ═══
 • Use the [Previous] and [Following] context to understand what pronouns refer to
   (e.g., "it uses three layers" — context tells you "it" = "neural network")
 • Use the video summary to understand the overall topic and field
-• When in doubt between svg and text, prefer svg — visual explanations are more engaging
-• When in doubt between text and none, prefer text — information reinforcement helps learning
+• When in doubt between svg and text, prefer the one that clarifies the idea more
+• When in doubt between text and none, prefer text if the segment contains a clear takeaway, terminology, or memorable claim
+• Target a moderate enhancement policy, roughly 28%-40% of segments, not saturation
 
 ═══ Output Format (JSON only) ═══
 {
@@ -305,7 +313,7 @@ that can be mapped to VISUAL METAPHORS. Think like a designer — if you can ske
             prompt = f"""Analyze the [CURRENT TARGET] segment. Use context to understand its full meaning.
 
 ═══ Video Summary ═══
-{global_summary[:1500]}
+{global_summary}
 
 ═══ Subtitle Context ═══
 {context_block}
@@ -323,7 +331,7 @@ Return JSON only."""
 
             # Confidence based on density + type
             density = parsed.get("information_density", "low")
-            conf = {"high": 0.85, "medium": 0.65, "low": 0.4}.get(density, 0.5)
+            conf = {"high": 0.86, "medium": 0.66, "low": 0.36}.get(density, 0.5)
 
             return {
                 **segment,
@@ -337,3 +345,128 @@ Return JSON only."""
         except Exception as e:
             print(f"      LLM classification failed: {e}")
             return simple_classify_segment(segment)
+
+    def _sparsify_decisions(self, decisions: List[Dict]) -> List[Dict]:
+        """Prune low-value enhancements to keep density reasonable."""
+        enhanced = [d for d in decisions if d["enhancement_type"] != "none"]
+        if not decisions:
+            return decisions
+
+        target_rate = 0.55
+        current_rate = len(enhanced) / len(decisions)
+        if current_rate <= target_rate:
+            return decisions
+
+        print(f"  > Sparsifying decisions: rate {current_rate:.2f} -> target {target_rate:.2f}")
+        protected_keywords = (
+            "definition", "means", "called", "important", "key", "warning",
+            "process", "mechanism", "system", "architecture", "because", "therefore",
+        )
+        removable = []
+        for idx, dec in enumerate(decisions):
+            if dec["enhancement_type"] == "none":
+                continue
+            text_lower = dec.get("text", "").lower()
+            protected = any(keyword in text_lower for keyword in protected_keywords)
+            score = dec.get("confidence", 0.5)
+            if dec["enhancement_type"] == "svg":
+                score += 0.03
+            if protected:
+                score += 0.12
+            removable.append((score, idx))
+
+        removable.sort(key=lambda item: item[0])
+        target_keep = int(len(decisions) * target_rate)
+        to_remove = max(0, len(enhanced) - target_keep)
+        removed = 0
+        for _, idx in removable:
+            if removed >= to_remove:
+                break
+            decisions[idx]["enhancement_type"] = "none"
+            decisions[idx]["reason"] = "sparsify_override: low incremental value"
+            removed += 1
+
+        print(f"  > Sparsify removed {removed} low-value enhancements")
+        return decisions
+
+    def _densify_decisions(self, decisions: List[Dict]) -> List[Dict]:
+        """Backfill useful enhancements if the pipeline becomes too sparse."""
+        if not decisions:
+            return decisions
+
+        target_min_rate = 0.33
+        enhanced_count = sum(1 for d in decisions if d["enhancement_type"] != "none")
+        current_rate = enhanced_count / len(decisions)
+        if current_rate >= target_min_rate:
+            return decisions
+
+        print(f"  > Densifying decisions: rate {current_rate:.2f} -> target {target_min_rate:.2f}")
+        target_keep = int(round(len(decisions) * target_min_rate))
+        needed = max(0, target_keep - enhanced_count)
+        if needed == 0:
+            return decisions
+
+        candidates = []
+        for idx, dec in enumerate(decisions):
+            if dec["enhancement_type"] != "none":
+                continue
+            promoted_type, score = self._score_none_segment_for_backfill(dec)
+            if promoted_type == "none" or score < 0.62:
+                continue
+            candidates.append((score, idx, promoted_type))
+
+        candidates.sort(reverse=True)
+        promoted = 0
+        for score, idx, promoted_type in candidates:
+            if promoted >= needed:
+                break
+            decisions[idx]["enhancement_type"] = promoted_type
+            decisions[idx]["confidence"] = max(decisions[idx].get("confidence", 0.0), min(score, 0.9))
+            decisions[idx]["reason"] = f"densify_override: promoted to {promoted_type}"
+            if promoted_type == "svg":
+                decisions[idx]["visual_description"] = "Show the structure, comparison, or flow in a clean explanatory diagram."
+            else:
+                decisions[idx]["visual_description"] = "Highlight the key takeaway in a concise text card."
+            promoted += 1
+
+        print(f"  > Densify promoted {promoted} useful segments")
+        return decisions
+
+    def _score_none_segment_for_backfill(self, decision: Dict):
+        text = decision.get("text", "").lower()
+        if not text:
+            return "none", 0.0
+
+        svg_markers = [
+            "process", "mechanism", "system", "architecture", "pipeline", "workflow",
+            "how it works", "because", "therefore", "leads to", "results in",
+            "compare", "versus", "layers", "network", "model", "input", "output",
+            "step", "first", "then", "finally",
+        ]
+        text_markers = [
+            "means", "called", "is when", "defined", "important", "key", "remember",
+            "rule", "principle", "idea", "concept", "term", "goal", "warning",
+            "number", "percent", "times", "better", "worse",
+        ]
+        filler_markers = [
+            "you know", "i think", "kind of", "sort of", "podcast", "conversation with",
+            "honor", "pleasure", "really", "yeah",
+        ]
+
+        if sum(1 for marker in filler_markers if marker in text) >= 2:
+            return "none", 0.0
+
+        svg_score = sum(1 for marker in svg_markers if marker in text) * 0.14
+        text_score = sum(1 for marker in text_markers if marker in text) * 0.14
+
+        if any(token in text for token in ("%", "percent", " x ", " times", " ratio", "score")):
+            text_score += 0.12
+        if len(text.split()) >= 16:
+            svg_score += 0.08
+            text_score += 0.05
+
+        if svg_score >= text_score and svg_score >= 0.62:
+            return "svg", svg_score
+        if text_score >= 0.62:
+            return "text", text_score
+        return "none", max(svg_score, text_score)

@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional
 from multimodal_utils import (
     create_fallback_transcript,
     save_transcript, load_transcript,
-    save_segments, load_segments
+    save_segments, load_segments, save_decisions
 )
 
 # 导入各Agent
@@ -21,6 +21,9 @@ from layout_agent import LayoutProcessor
 from decision_agent import DecisionAgent
 from scene_agent import SceneAgent
 from content_agent import ContentAgent
+from confusion_agent import ConfusionAgent
+from mechanism_agent import MechanismAgent
+from concept_graph_agent import ConceptGraphAgent
 
 
 class MultimodalAnalyzer:
@@ -33,7 +36,12 @@ class MultimodalAnalyzer:
         llm_type: str = None,
         vision_llm_type: str = None,
         svg_mode: str = "simple",
-        max_workers: int = 1
+        max_workers: int = 1,
+        layout_max_workers: int = 1,
+        scene_max_workers: int = 1,
+        enable_misconception: bool = False,
+        enable_mechanism_chain: bool = False,
+        enable_concept_graph: bool = False,
     ):
         """初始化分析器"""
         self.video_path = video_path
@@ -45,15 +53,27 @@ class MultimodalAnalyzer:
         self.vision_llm_type = vision_llm_type or "claude-sonnet-4-5-20250929"
         self.svg_mode = svg_mode
         self.max_workers = max(1, max_workers)
+        self.layout_max_workers = max(1, layout_max_workers)
+        self.scene_max_workers = max(1, scene_max_workers)
+        self.enable_misconception = enable_misconception
+        self.enable_mechanism_chain = enable_mechanism_chain
+        self.enable_concept_graph = enable_concept_graph
         
         # 文件路径
         self.whisper_transcript_path = os.path.join(self.output_dir, "whisper_transcript.txt")
         self.semantic_segments_path = os.path.join(self.output_dir, "semantic_segments.txt")
         
         # 初始化各Agent
-        self.layout_agent = LayoutProcessor(video_path) if video_path else None
+        self.layout_agent = LayoutProcessor(video_path, max_workers=self.layout_max_workers) if video_path else None
         self.decision_agent = DecisionAgent(self.llm_type, self.vision_llm_type, self.output_dir)
-        self.scene_agent = SceneAgent(video_path, self.output_dir, self.llm_type) if video_path else None
+        self.scene_agent = SceneAgent(video_path, self.output_dir, self.llm_type, max_workers=self.scene_max_workers) if video_path else None
+        self.confusion_agent = ConfusionAgent(self.llm_type, self.output_dir, max_workers=self.max_workers)
+        self.mechanism_agent = MechanismAgent(self.llm_type, self.output_dir, max_workers=self.max_workers)
+        self.concept_graph_agent = ConceptGraphAgent(
+            self.llm_type,
+            self.output_dir,
+            max_workers=self.max_workers
+        )
         self.content_agent = ContentAgent(
             self.llm_type, 
             self.vision_llm_type, 
@@ -61,6 +81,8 @@ class MultimodalAnalyzer:
             svg_mode=self.svg_mode,
             max_workers=self.max_workers
         )
+        self.global_concept_graph = {}
+        self.global_summary = ""
         
         print(f"✓ MultimodalAnalyzer initialized")
         print(f"  Output dir: {self.output_dir}")
@@ -250,7 +272,31 @@ class MultimodalAnalyzer:
         print("="*70)
         
         # 调用DecisionAgent
-        decisions = self.decision_agent.classify_segments(segments, force_reprocess)
+        decisions = self.decision_agent.classify_segments(segments, force_reprocess, max_workers=self.max_workers)
+        self.global_summary = self.decision_agent.latest_global_summary
+
+        if self.enable_misconception:
+            print("  > Running misconception analysis...")
+            decisions = self.confusion_agent.analyze_segments(
+                segments, decisions, self.global_summary, force_reprocess
+            )
+
+        if self.enable_mechanism_chain:
+            print("  > Running mechanism-chain analysis...")
+            decisions = self.mechanism_agent.analyze_segments(
+                segments, decisions, self.global_summary, force_reprocess
+            )
+
+        if self.enable_concept_graph:
+            print("  > Building concept graph...")
+            self.global_concept_graph = self.concept_graph_agent.build_graph(
+                segments, decisions, self.global_summary, force_reprocess
+            )
+            print(f"  > Concept graph ready: {len(self.global_concept_graph.get('nodes', []))} nodes")
+
+        # Persist the post-routing decisions so downstream cached phases can
+        # restore misconception/mechanism types and payloads correctly.
+        save_decisions(decisions, os.path.join(self.output_dir, "enhancement_decisions.txt"))
         
         return decisions
     
@@ -272,7 +318,7 @@ class MultimodalAnalyzer:
         
         # 调用LayoutProcessor
         if not self.layout_agent:
-            self.layout_agent = LayoutProcessor(self.video_path)
+            self.layout_agent = LayoutProcessor(self.video_path, max_workers=self.layout_max_workers)
         
         enhancement_points = self.layout_agent.calculate_layouts(
             decisions,
@@ -301,7 +347,7 @@ class MultimodalAnalyzer:
         
         # 调用SceneAgent
         if not self.scene_agent:
-            self.scene_agent = SceneAgent(self.video_path, self.output_dir)
+            self.scene_agent = SceneAgent(self.video_path, self.output_dir, max_workers=self.scene_max_workers)
         
         enhancement_points = self.scene_agent.analyze_scenes(enhancement_points, force_reprocess)
         

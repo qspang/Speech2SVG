@@ -33,7 +33,8 @@ class HTMLGenerator:
         self,
         video_source: str,
         transcript_path: str,
-        html_path: str
+        html_path: str,
+        concept_graph: Dict = None
     ) -> str:
         """
         生成初始HTML骨架 (含视频、字幕面板、空SVG画廊)
@@ -42,7 +43,7 @@ class HTMLGenerator:
         video_src = self._resolve_video_source(video_source)
         transcript_data = self._parse_transcript(transcript_path)
 
-        html_content = self._build_skeleton_html(video_src, transcript_data)
+        html_content = self._build_skeleton_html(video_src, transcript_data, concept_graph or {})
 
         os.makedirs(os.path.dirname(html_path), exist_ok=True)
         with open(html_path, 'w', encoding='utf-8') as f:
@@ -63,6 +64,8 @@ class HTMLGenerator:
         overlay_html = self._generate_overlay_html(point, idx)
         # 生成gallery item HTML (画廊缩略图)
         gallery_html = self._generate_gallery_item_html(point, idx)
+        focus_html = self._generate_focus_panel_item_html(point, idx)
+        content_type = point.get('content', {}).get('type', 'text')
 
         # 在标记位置插入新内容
         html_content = html_content.replace(
@@ -73,12 +76,21 @@ class HTMLGenerator:
             '<!-- GALLERY_MARKER -->',
             gallery_html + '\n                <!-- GALLERY_MARKER -->'
         )
+        if content_type == 'mechanism_chain':
+            html_content = html_content.replace(
+                '<!-- MECHANISM_PANEL_MARKER -->',
+                focus_html + '\n                    <!-- MECHANISM_PANEL_MARKER -->'
+            )
+        elif content_type == 'misconception':
+            html_content = html_content.replace(
+                '<!-- MISCONCEPTION_PANEL_MARKER -->',
+                focus_html + '\n                    <!-- MISCONCEPTION_PANEL_MARKER -->'
+            )
 
         with open(html_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
 
-        content_type = point.get('content_type', 'unknown')
-        print(f"    ✓ Appended [{content_type}] #{idx} to HTML")
+        print(f"    ✓ Appended [{point.get('content_type', 'unknown')}] #{idx} to HTML")
 
     def generate(
         self,
@@ -92,12 +104,14 @@ class HTMLGenerator:
         video_src = self._resolve_video_source(video_source)
         transcript_data = self._parse_transcript(transcript_path) if transcript_path else []
 
-        html_content = self._build_skeleton_html(video_src, transcript_data)
+        html_content = self._build_skeleton_html(video_src, transcript_data, {})
 
         # 依次追加所有enhancement points
         for idx, point in enumerate(enhancement_points):
             overlay_html = self._generate_overlay_html(point, idx)
             gallery_html = self._generate_gallery_item_html(point, idx)
+            focus_html = self._generate_focus_panel_item_html(point, idx)
+            content_type = point.get('content', {}).get('type', 'text')
 
             html_content = html_content.replace(
                 '<!-- OVERLAY_MARKER -->',
@@ -107,6 +121,16 @@ class HTMLGenerator:
                 '<!-- GALLERY_MARKER -->',
                 gallery_html + '\n                <!-- GALLERY_MARKER -->'
             )
+            if content_type == 'mechanism_chain':
+                html_content = html_content.replace(
+                    '<!-- MECHANISM_PANEL_MARKER -->',
+                    focus_html + '\n                    <!-- MECHANISM_PANEL_MARKER -->'
+                )
+            elif content_type == 'misconception':
+                html_content = html_content.replace(
+                    '<!-- MISCONCEPTION_PANEL_MARKER -->',
+                    focus_html + '\n                    <!-- MISCONCEPTION_PANEL_MARKER -->'
+                )
 
         return html_content
 
@@ -114,10 +138,12 @@ class HTMLGenerator:
     # Private: HTML骨架构建
     # ================================================================
 
-    def _build_skeleton_html(self, video_src: str, transcript_data: List[Dict]) -> str:
+    def _build_skeleton_html(self, video_src: str, transcript_data: List[Dict], concept_graph: Dict) -> str:
         """构建完整HTML骨架"""
         transcript_json = json.dumps(transcript_data, ensure_ascii=False)
+        concept_graph_json = json.dumps(concept_graph or {}, ensure_ascii=False)
         subtitle_entries_html = self._generate_subtitle_entries(transcript_data)
+        concept_graph_html = self._generate_concept_graph_html(concept_graph or {})
 
         return f'''<!DOCTYPE html>
 <html lang="zh-CN">
@@ -198,16 +224,40 @@ class HTMLGenerator:
                     <span class="video-time" id="videoTimeDisplay">00:00 / 00:00</span>
                 </div>
             </div>
+            <div class="insight-row">
+                <div class="focus-panel mechanism-panel">
+                    <div class="focus-panel-header">
+                        <h3>⚙️ 机制链</h3>
+                        <span class="focus-panel-count" id="mechanismCount">0 条</span>
+                    </div>
+                    <div class="focus-panel-list" id="mechanismList">
+                    <!-- MECHANISM_PANEL_MARKER -->
+                    </div>
+                    <div class="focus-panel-empty" id="mechanismEmpty">暂无机制链命中</div>
+                </div>
+                <div class="focus-panel misconception-panel">
+                    <div class="focus-panel-header">
+                        <h3>⚠️ 误解纠正</h3>
+                        <span class="focus-panel-count" id="misconceptionCount">0 条</span>
+                    </div>
+                    <div class="focus-panel-list" id="misconceptionList">
+                    <!-- MISCONCEPTION_PANEL_MARKER -->
+                    </div>
+                    <div class="focus-panel-empty" id="misconceptionEmpty">暂无误解纠正命中</div>
+                </div>
+            </div>
         </div>
 
         <!-- Right Panel: Subtitles (Top) & Gallery (Bottom) -->
         <div class="right-panel">
-            <div class="subtitle-header">
-                <h3>📝 字幕时间线</h3>
-                <span class="subtitle-count">{len(transcript_data)} 条字幕</span>
-            </div>
-            <div class="subtitle-list" id="subtitleList">
+            <div class="subtitle-section">
+                <div class="subtitle-header">
+                    <h3>📝 字幕时间线</h3>
+                    <span class="subtitle-count">{len(transcript_data)} 条字幕</span>
+                </div>
+                <div class="subtitle-list" id="subtitleList">
 {subtitle_entries_html}
+                </div>
             </div>
             
             <!-- SVG Gallery Section (Moved from left to bottom-right) -->
@@ -224,6 +274,7 @@ class HTMLGenerator:
                     <p class="hint">生成的SVG动画和文字卡片将显示在此处</p>
                 </div>
             </div>
+            {concept_graph_html}
         </div>
     </div>
 
@@ -252,7 +303,7 @@ class HTMLGenerator:
     <button class="shortcuts-trigger" onclick="toggleShortcuts()" title="快捷键帮助">⌨️</button>
 
     <script>
-{self._generate_javascript(transcript_json)}
+{self._generate_javascript(transcript_json, concept_graph_json)}
     </script>
 </body>
 </html>'''
@@ -285,16 +336,30 @@ class HTMLGenerator:
             height = layout.get('height', 250)
             left_pct = x / self.LAYOUT_CANVAS_W * 100
             top_pct = y / self.LAYOUT_CANVAS_H * 100
-            
-            # 使用 width: max-content 让卡片大小自适应文字长短，但使用 max-width 防止超出边界
-            w_pct = max(width / self.LAYOUT_CANVAS_W * 100, 25.0)  # 至少给 25% 宽度让文字呼吸
-            h_pct_max = max(height / self.LAYOUT_CANVAS_H * 100 * 2.5, 45.0) 
-            style = f'left: {left_pct:.2f}%; top: {top_pct:.2f}%; width: max-content; max-width: {w_pct:.2f}%; height: auto; max-height: {h_pct_max:.2f}%; min-height: 5%;'
+
+            desired_w_pct = max(width / self.LAYOUT_CANVAS_W * 100, 22.0)
+            available_right_pct = max(16.0, 98.0 - left_pct)
+            fit_w_pct = min(desired_w_pct, available_right_pct)
+            h_pct_max = max(height / self.LAYOUT_CANVAS_H * 100 * 2.15, 42.0)
+            scale = max(0.72, min(1.0, fit_w_pct / max(desired_w_pct, 1.0)))
+            edge_class = " right-edge-card" if left_pct > 58.0 else ""
+            style = (
+                f'left: {left_pct:.2f}%; top: {top_pct:.2f}%; '
+                f'width: {fit_w_pct:.2f}%; max-width: {fit_w_pct:.2f}%; '
+                f'height: auto; max-height: {h_pct_max:.2f}%; min-height: 5%; '
+                f'--overlay-scale: {scale:.3f};'
+            )
 
         content_html = self._generate_content_html(content, point)
         container_class = "enhancement-container"
         if content_type == 'svg':
             container_class += " svg-overlay"
+        elif content_type == 'mechanism_chain':
+            container_class += " mechanism-overlay"
+        elif content_type == 'misconception':
+            container_class += " misconception-overlay"
+        if content_type != 'svg' and left_pct > 58.0:
+            container_class += edge_class
 
         timestamp = point.get('timestamp', 0)
         duration = point.get('duration', 5)
@@ -335,6 +400,34 @@ class HTMLGenerator:
                         <span class="gallery-label">🎨 SVG</span>
                     </div>
                 </div>'''
+        elif content_type == 'mechanism_chain':
+            title = html_module.escape(content.get('chain_title', topic)[:34])
+            return f'''                <div class="gallery-item mechanism-gallery-item" data-start="{timestamp}"
+                     onclick="jumpTo({timestamp})"
+                     title="{escaped_topic}">
+                    <div class="gallery-thumb text-thumb mechanism-thumb">
+                        <span class="text-thumb-icon">⚙️</span>
+                        <span class="text-thumb-title">{title}</span>
+                    </div>
+                    <div class="gallery-info">
+                        <span class="gallery-time">{time_str}</span>
+                        <span class="gallery-label">机制链</span>
+                    </div>
+                </div>'''
+        elif content_type == 'misconception':
+            title = html_module.escape(content.get('hero_text', topic)[:34])
+            return f'''                <div class="gallery-item misconception-gallery-item" data-start="{timestamp}"
+                     onclick="jumpTo({timestamp})"
+                     title="{escaped_topic}">
+                    <div class="gallery-thumb text-thumb misconception-thumb">
+                        <span class="text-thumb-icon">⚠️</span>
+                        <span class="text-thumb-title">{title}</span>
+                    </div>
+                    <div class="gallery-info">
+                        <span class="gallery-time">{time_str}</span>
+                        <span class="gallery-label">误解纠正</span>
+                    </div>
+                </div>'''
         else:
             title = content.get('title', topic)[:30]
             escaped_title = html_module.escape(title)
@@ -351,6 +444,37 @@ class HTMLGenerator:
                         <span class="gallery-label">文字</span>
                     </div>
                 </div>'''
+
+    def _generate_focus_panel_item_html(self, point: Dict, idx: int) -> str:
+        content = point.get('content', {})
+        content_type = content.get('type', 'text')
+        if content_type not in ('mechanism_chain', 'misconception'):
+            return ''
+
+        timestamp = point.get('timestamp', 0)
+        time_str = self._format_time(timestamp)
+
+        if content_type == 'mechanism_chain':
+            title = html_module.escape(content.get('chain_title', point.get('text', '机制链'))[:48])
+            stages = content.get('stages', [])[:3]
+            stage_preview = " → ".join(html_module.escape(str(stage)) for stage in stages)
+            return (
+                f'                    <div class="focus-item mechanism-focus-item" data-start="{timestamp}" onclick="jumpTo({timestamp})">'
+                f'<div class="focus-item-top"><span class="focus-item-time">{time_str}</span><span class="focus-item-badge">机制链</span></div>'
+                f'<div class="focus-item-title">{title}</div>'
+                f'<div class="focus-item-sub">{stage_preview}</div>'
+                f'</div>'
+            )
+
+        hero_text = html_module.escape(content.get('hero_text', point.get('text', '误解纠正'))[:60])
+        explanation = html_module.escape(content.get('explanation', '')[:90])
+        return (
+            f'                    <div class="focus-item misconception-focus-item" data-start="{timestamp}" onclick="jumpTo({timestamp})">'
+            f'<div class="focus-item-top"><span class="focus-item-time">{time_str}</span><span class="focus-item-badge">误解纠正</span></div>'
+            f'<div class="focus-item-title">{hero_text}</div>'
+            f'<div class="focus-item-sub">{explanation}</div>'
+            f'</div>'
+        )
 
     def _generate_content_html(self, content: Dict, point: Dict) -> str:
         """生成内容HTML (复用原有逻辑)"""
@@ -388,8 +512,80 @@ class HTMLGenerator:
                 result += f'<div class="card-explanation">{explanation}</div>'
             result += '</div>'
             return result
+        elif content_type == 'misconception':
+            label = content.get('label', '[ ⚠ Misconception Alert ]')
+            hero_text = html_module.escape(content.get('hero_text', ''))
+            explanation = html_module.escape(content.get('explanation', ''))
+            why_confusing = html_module.escape(content.get('why_confusing', ''))
+            accent_color = content.get('style', {}).get('accent_color', '#f59e0b')
+            return (
+                f'<div class="text-content misconception-card premium-glassmorphism" '
+                f'style="--card-accent: {accent_color};">'
+                f'<div class="card-label">{html_module.escape(label)}</div>'
+                f'<div class="misconception-row"><span class="misconception-tag">易错理解</span>'
+                f'<div class="misconception-main">{hero_text}</div></div>'
+                f'<div class="misconception-row"><span class="misconception-tag correct">正确理解</span>'
+                f'<div class="card-explanation">{explanation}</div></div>'
+                f'<div class="misconception-why">{why_confusing}</div>'
+                f'</div>'
+            )
+        elif content_type == 'mechanism_chain':
+            accent_color = content.get('style', {}).get('accent_color', '#00f3ff')
+            title = html_module.escape(content.get('chain_title', 'Mechanism Chain'))
+            stages = content.get('stages', [])
+            current_focus = int(content.get('current_focus_stage', 0))
+            stage_html = []
+            for idx, stage in enumerate(stages):
+                cls = 'mechanism-stage active' if idx == current_focus else 'mechanism-stage'
+                stage_html.append(f'<div class="{cls}"><span class="stage-index">{idx + 1}</span><span>{html_module.escape(str(stage))}</span></div>')
+            return (
+                f'<div class="mechanism-chain-card premium-glassmorphism" style="--card-accent: {accent_color};">'
+                f'<div class="card-label">[ ⚙ Mechanism Chain ]</div>'
+                f'<div class="mechanism-title">{title}</div>'
+                f'<div class="mechanism-stage-row">{"".join(stage_html)}</div>'
+                f'</div>'
+            )
 
         return '<div class="placeholder">Content</div>'
+
+    def _generate_concept_graph_html(self, concept_graph: Dict) -> str:
+        if not concept_graph or not concept_graph.get('nodes'):
+            return ''
+
+        title = html_module.escape(concept_graph.get('graph_title', 'Global Concept Graph'))
+        summary = html_module.escape(concept_graph.get('summary', ''))
+        nodes_html = []
+        for node in concept_graph.get('nodes', []):
+            label = html_module.escape(node.get('label', 'Node'))
+            node_id = html_module.escape(node.get('id', ''))
+            nodes_html.append(
+                f'<div class="concept-node" data-node-id="{node_id}">'
+                f'<span class="concept-node-label">{label}</span>'
+                f'<span class="concept-node-weight">{node.get("weight", 1)}</span>'
+                f'</div>'
+            )
+
+        edges_html = []
+        for edge in concept_graph.get('edges', [])[:6]:
+            edges_html.append(
+                f'<div class="concept-edge">{html_module.escape(edge.get("source", ""))} → {html_module.escape(edge.get("target", ""))}</div>'
+            )
+
+        return f'''
+            <div class="concept-graph-section" id="conceptGraphSection">
+                <div class="concept-graph-header">
+                    <h3>🧠 全局概念图</h3>
+                    <span class="concept-graph-count">{len(concept_graph.get('nodes', []))} 个节点</span>
+                </div>
+                <div class="concept-graph-title">{title}</div>
+                <div class="concept-graph-summary">{summary}</div>
+                <div class="concept-graph-nodes" id="conceptGraphNodes">
+                    {"".join(nodes_html)}
+                </div>
+                <div class="concept-graph-edges" id="conceptGraphEdges">
+                    {"".join(edges_html)}
+                </div>
+            </div>'''
 
     def _generate_subtitle_entries(self, transcript_data: List[Dict]) -> str:
         """生成字幕条目HTML"""
@@ -623,27 +819,43 @@ class HTMLGenerator:
 
         .left-panel {
             width: 66.66%;
-            display: flex;
-            flex-direction: column;
+            display: grid;
+            grid-template-rows: minmax(0, 75%) minmax(180px, 25%);
             border-right: 1px solid var(--border);
             min-width: 0;
-            background: #000;
+            background: var(--bg-primary);
         }
 
         .right-panel {
             width: 33.33%;
+            display: grid;
+            grid-template-rows: minmax(0, 40%) minmax(0, 28%) minmax(200px, 32%);
+            min-width: 0;
+            background: var(--bg-secondary);
+        }
+
+        .subtitle-section {
             display: flex;
             flex-direction: column;
-            min-width: 0;
+            min-height: 0;
         }
 
         /* ========== Video Section ========== */
         .video-section {
-            flex: 0 0 58%;
             display: flex;
             flex-direction: column;
             background: #000;
             border-bottom: 1px solid var(--border);
+            min-height: 0;
+        }
+
+        .insight-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-secondary);
+            min-height: 0;
         }
 
         .video-wrapper {
@@ -675,9 +887,14 @@ class HTMLGenerator:
             opacity: 0;
             transition: opacity 0.5s ease-in-out;
             pointer-events: none;
+            min-width: 0;
         }
 
         .enhancement-container.active { opacity: 1; }
+
+        .right-edge-card .premium-glassmorphism {
+            padding: 18px 22px;
+        }
 
         /* SVG Overlay */
         .svg-overlay {
@@ -687,6 +904,13 @@ class HTMLGenerator:
             /* In-Video Cinematic Effect: blend with background */
             mix-blend-mode: screen; 
             filter: drop-shadow(0 0 20px rgba(0,0,0,0.5));
+        }
+
+        .mechanism-overlay,
+        .misconception-overlay {
+            display: flex;
+            align-items: stretch;
+            justify-content: center;
         }
 
         .svg-wrapper {
@@ -727,6 +951,9 @@ class HTMLGenerator:
             gap: 12px;
             /* In-Video effect */
             mix-blend-mode: normal; 
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
         }
 
         .text-content {
@@ -734,10 +961,11 @@ class HTMLGenerator:
             height: auto;
             display: flex;
             overflow: hidden;
+            min-width: 0;
         }
 
         .card-label { 
-            font-size: 13px;
+            font-size: calc(13px * var(--overlay-scale, 1));
             font-weight: 600;
             letter-spacing: 0.5px;
             color: var(--card-accent, #a78bfa);
@@ -750,21 +978,103 @@ class HTMLGenerator:
         }
         
         .card-hero { 
-            font-size: 34px; 
+            font-size: calc(34px * var(--overlay-scale, 1)); 
             font-weight: 300; 
             line-height: 1.3; 
             letter-spacing: -0.5px;
             margin: 0; 
             text-shadow: 0 2px 10px rgba(0,0,0,0.5);
             color: #ffffff;
+            overflow-wrap: anywhere;
         }
         
         .card-explanation { 
-            font-size: 15px; 
+            font-size: calc(15px * var(--overlay-scale, 1)); 
             line-height: 1.6; 
             color: rgba(255, 255, 255, 0.75); 
             margin-top: 4px;
             font-weight: 400;
+            overflow-wrap: anywhere;
+        }
+
+        .misconception-card,
+        .mechanism-chain-card {
+            width: 100%;
+            height: 100%;
+            overflow-y: auto;
+        }
+
+        .misconception-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .misconception-tag {
+            font-size: calc(11px * var(--overlay-scale, 1));
+            font-weight: 700;
+            color: #fbbf24;
+            text-transform: uppercase;
+            letter-spacing: 0.7px;
+        }
+
+        .misconception-tag.correct { color: #34d399; }
+
+        .misconception-main {
+            font-size: calc(20px * var(--overlay-scale, 1));
+            line-height: 1.45;
+            color: #fff7ed;
+            overflow-wrap: anywhere;
+        }
+
+        .misconception-why {
+            font-size: calc(13px * var(--overlay-scale, 1));
+            line-height: 1.5;
+            color: rgba(255, 255, 255, 0.68);
+            padding-top: 6px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            overflow-wrap: anywhere;
+        }
+
+        .mechanism-title {
+            font-size: calc(22px * var(--overlay-scale, 1));
+            font-weight: 500;
+            line-height: 1.35;
+        }
+
+        .mechanism-stage-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .mechanism-stage {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-height: 96px;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.05);
+            color: rgba(255,255,255,0.82);
+            min-width: 0;
+        }
+
+        .mechanism-stage.active {
+            border-color: var(--card-accent, #6366f1);
+            background: rgba(99, 102, 241, 0.18);
+            color: #ffffff;
+            box-shadow: 0 0 0 1px rgba(99,102,241,0.15) inset;
+        }
+
+        .stage-index {
+            font-size: calc(11px * var(--overlay-scale, 1));
+            font-weight: 700;
+            color: var(--card-accent, #818cf8);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
         }
 
         /* Timeline Bar */
@@ -800,6 +1110,8 @@ class HTMLGenerator:
         .timeline-dot:hover { transform: translate(-50%, -50%) scale(1.5); }
         .timeline-dot.svg-dot { background: var(--success); }
         .timeline-dot.text-dot { background: var(--warning); }
+        .timeline-dot.mechanism-dot { background: #22d3ee; }
+        .timeline-dot.misconception-dot { background: #f59e0b; }
 
         /* Video Controls */
         .video-controls {
@@ -839,12 +1151,12 @@ class HTMLGenerator:
 
         /* ========== Gallery Section ========== */
         .gallery-section {
-            height: 40%;
             display: flex;
             flex-direction: column;
             background: var(--bg-secondary);
             overflow: hidden;
             border-top: 1px solid var(--border);
+            min-height: 0;
         }
 
         .gallery-header {
@@ -894,6 +1206,16 @@ class HTMLGenerator:
             transform: translateY(-3px);
         }
 
+        .mechanism-gallery-item:hover {
+            border-color: #22d3ee;
+            box-shadow: 0 4px 12px rgba(34, 211, 238, 0.22);
+        }
+
+        .misconception-gallery-item:hover {
+            border-color: #f59e0b;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.22);
+        }
+
         .gallery-thumb {
             aspect-ratio: 16 / 9;
             width: 100%;
@@ -918,6 +1240,9 @@ class HTMLGenerator:
             gap: 4px;
             padding: 12px;
         }
+
+        .mechanism-thumb { background: linear-gradient(135deg, rgba(34,211,238,0.18), rgba(14,116,144,0.16)); }
+        .misconception-thumb { background: linear-gradient(135deg, rgba(245,158,11,0.18), rgba(146,64,14,0.16)); }
 
         .text-thumb-icon { font-size: 24px; }
 
@@ -967,6 +1292,183 @@ class HTMLGenerator:
             font-size: 12px;
             margin-top: 8px;
             opacity: 0.6;
+        }
+
+        .focus-panel {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .focus-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .focus-panel-header h3 {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .focus-panel-count {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .focus-panel-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 10px 12px;
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .focus-panel-empty {
+            padding: 0 12px 12px;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        .focus-item {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .focus-item:hover {
+            transform: translateY(-2px);
+        }
+
+        .mechanism-focus-item:hover {
+            border-color: #22d3ee;
+            box-shadow: 0 4px 12px rgba(34, 211, 238, 0.16);
+        }
+
+        .misconception-focus-item:hover {
+            border-color: #f59e0b;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.16);
+        }
+
+        .focus-item-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            gap: 8px;
+        }
+
+        .focus-item-time {
+            font-size: 11px;
+            color: var(--accent-light);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .focus-item-badge {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .focus-item-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+            line-height: 1.45;
+            margin-bottom: 4px;
+        }
+
+        .focus-item-sub {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.45;
+        }
+
+        .concept-graph-section {
+            border-top: 1px solid var(--border);
+            background: linear-gradient(180deg, rgba(26,27,37,0.98), rgba(18,19,29,0.98));
+            padding: 14px 16px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .concept-graph-header,
+        .concept-graph-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .concept-graph-header h3,
+        .concept-graph-title {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .concept-graph-count {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .concept-graph-summary {
+            font-size: 12px;
+            line-height: 1.55;
+            color: var(--text-secondary);
+        }
+
+        .concept-graph-nodes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            overflow-y: auto;
+        }
+
+        .concept-node {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.06);
+            color: var(--text-secondary);
+            transition: all 0.2s ease;
+        }
+
+        .concept-node.active {
+            color: #ffffff;
+            border-color: var(--accent);
+            background: rgba(99,102,241,0.18);
+            box-shadow: 0 0 0 1px rgba(99,102,241,0.15) inset;
+        }
+
+        .concept-node-label { font-size: 12px; }
+        .concept-node-weight {
+            font-size: 10px;
+            color: var(--accent-light);
+            font-weight: 700;
+        }
+
+        .concept-graph-edges {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 4px;
+            font-size: 11px;
+            color: var(--text-muted);
+            overflow-y: auto;
         }
 
         /* ========== Subtitle Panel ========== */
@@ -1173,10 +1675,11 @@ class HTMLGenerator:
     # Private: JavaScript
     # ================================================================
 
-    def _generate_javascript(self, transcript_json: str) -> str:
+    def _generate_javascript(self, transcript_json: str, concept_graph_json: str) -> str:
         return f'''
         // ========== Data ==========
         const transcriptData = {transcript_json};
+        const conceptGraphData = {concept_graph_json};
 
         // ========== DOM Elements ==========
         const video = document.getElementById('mainVideo');
@@ -1186,6 +1689,8 @@ class HTMLGenerator:
         const galleryGrid = document.getElementById('galleryGrid');
         const galleryEmpty = document.getElementById('galleryEmpty');
         const galleryCount = document.getElementById('galleryCount');
+        const mechanismList = document.getElementById('mechanismList');
+        const misconceptionList = document.getElementById('misconceptionList');
 
         // ========== State ==========
         let overlaysEnabled = true;
@@ -1208,6 +1713,8 @@ class HTMLGenerator:
                     }}
                 }});
             }}
+
+            syncConceptGraph(currentTime);
 
             // Update subtitle highlighting
             document.querySelectorAll('.subtitle-item').forEach(item => {{
@@ -1299,7 +1806,11 @@ class HTMLGenerator:
                 const pct = (start / duration) * 100;
 
                 const dot = document.createElement('div');
-                dot.className = 'timeline-dot ' + (type.includes('svg') ? 'svg-dot' : 'text-dot');
+                let dotClass = 'text-dot';
+                if (type.includes('svg')) dotClass = 'svg-dot';
+                else if (type.includes('mechanism')) dotClass = 'mechanism-dot';
+                else if (type.includes('misconception')) dotClass = 'misconception-dot';
+                dot.className = 'timeline-dot ' + dotClass;
                 dot.style.left = pct + '%';
                 dot.title = formatTime(start);
                 dot.onclick = function(e) {{ e.stopPropagation(); jumpTo(start); }};
@@ -1442,6 +1953,31 @@ class HTMLGenerator:
             const count = items.length;
             galleryCount.textContent = count + ' 个增强点';
             galleryEmpty.style.display = count > 0 ? 'none' : '';
+
+            const mechanismItems = mechanismList ? mechanismList.querySelectorAll('.focus-item').length : 0;
+            const misconceptionItems = misconceptionList ? misconceptionList.querySelectorAll('.focus-item').length : 0;
+            const mechanismCount = document.getElementById('mechanismCount');
+            const misconceptionCount = document.getElementById('misconceptionCount');
+            const mechanismEmpty = document.getElementById('mechanismEmpty');
+            const misconceptionEmpty = document.getElementById('misconceptionEmpty');
+
+            if (mechanismCount) mechanismCount.textContent = mechanismItems + ' 条';
+            if (misconceptionCount) misconceptionCount.textContent = misconceptionItems + ' 条';
+            if (mechanismEmpty) mechanismEmpty.style.display = mechanismItems > 0 ? 'none' : '';
+            if (misconceptionEmpty) misconceptionEmpty.style.display = misconceptionItems > 0 ? 'none' : '';
+        }}
+
+        function syncConceptGraph(currentTime) {{
+            if (!conceptGraphData || !conceptGraphData.timeline_updates) return;
+            let activeIds = [];
+            conceptGraphData.timeline_updates.forEach(update => {{
+                if (currentTime >= update.timestamp) {{
+                    activeIds = update.node_ids || [];
+                }}
+            }});
+            document.querySelectorAll('.concept-node').forEach(node => {{
+                node.classList.toggle('active', activeIds.includes(node.dataset.nodeId));
+            }});
         }}
 
         // ========== Utility ==========
@@ -1455,6 +1991,7 @@ class HTMLGenerator:
         updateGalleryCount();
         console.log('Video Enhancement Studio loaded');
         console.log('Transcript entries:', transcriptData.length);
+        console.log('Concept graph nodes:', (conceptGraphData.nodes || []).length);
 '''
 
 

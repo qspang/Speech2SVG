@@ -16,6 +16,12 @@ export XIAOCHI_API_KEY="sk-3pjhBWGy2expXnpNEwbafnhcDt2NMbAQJETvAuqHTxUKNrag"
 #   Normal mode (default):  bash run.sh
 #   Complex mode:           bash run.sh --complex
 #   With concurrency:       bash run.sh --max-workers 3
+#   Layout workers:         bash run.sh --layout-max-workers 4
+#   Scene workers:          bash run.sh --scene-max-workers 2
+#   Misconception mode:     bash run.sh --enable-misconception
+#   Mechanism mode:         bash run.sh --enable-mechanism-chain
+#   Concept graph mode:     bash run.sh --enable-concept-graph
+#   Combine modes:          bash run.sh --enable-misconception --enable-mechanism-chain --enable-concept-graph
 conda activate svg
 # Run video enhancer
 # python video_enhancer.py /home/ubuntu/sysu/svgagent/video/futureai.mp4 \
@@ -24,15 +30,26 @@ conda activate svg
 #     --max-workers 10 \
 #     "$@"
 
-# python video_enhancer.py /home/ubuntu/sysu/svgagent/video/futureai.mp4 \
-#     --llm glm-5 \
-#     --vision-llm qwen3.5-plus \
-#     --max-workers 3 \
-#     "$@"
-
-python video_enhancer.py /home/ubuntu/sysu/svgagent/video/futureai.mp4 \
-    --llm gemini-3.1-pro-high \
-    --vision-llm gemini-3.1-pro-high \
-    --svg-mode simple \
+python video_enhancer.py /home/ubuntu/sysu/svgagent/video/lx.mp4 \
+    --llm glm-5 \
+    --vision-llm qwen3.5-plus \
     --max-workers 5 \
+    --svg-mode simple \
+    --layout-max-workers 6 \
+    --scene-max-workers 3 \
+    --enable-misconception \
+    --enable-mechanism-chain \
+    --enable-concept-graph \
     "$@"
+
+# python video_enhancer.py /home/ubuntu/sysu/svgagent/video/lx.mp4 \
+#     --llm gemini-3.1-pro-high \
+#     --vision-llm gemini-3.1-pro-high \
+#     --svg-mode simple \
+#     --max-workers 5 \
+#     --layout-max-workers 6 \
+#     --scene-max-workers 3 \
+#     --enable-misconception \
+#     --enable-mechanism-chain \
+#     --enable-concept-graph \
+#     "$@" 

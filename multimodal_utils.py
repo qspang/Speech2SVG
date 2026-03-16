@@ -5,6 +5,7 @@ Multimodal Analyzer Utilities
 辅助函数：fallback、load/save等
 """
 
+import json
 import os
 from typing import List, Dict, Any
 
@@ -144,24 +145,29 @@ def load_segments(filepath: str) -> List[Dict]:
 def save_decisions(decisions: List[Dict], filepath: str):
     """保存判断结果"""
     with open(filepath, 'w', encoding='utf-8') as f:
-        for dec in decisions:
-            f.write(f"{dec['start']:.2f}\t{dec['end']:.2f}\t{dec['enhancement_type']}\t{dec['text']}\n")
+        json.dump(decisions, f, ensure_ascii=False, indent=2)
 
 
 def load_decisions(filepath: str) -> List[Dict]:
     """加载判断结果"""
-    decisions = []
     with open(filepath, 'r', encoding='utf-8') as f:
-        for line in f:
-            parts = line.strip().split('\t')
-            if len(parts) >= 4:
-                decisions.append({
-                    'start': float(parts[0]),
-                    'end': float(parts[1]),
-                    'enhancement_type': parts[2],
-                    'text': parts[3],
-                    'reason': 'cached'
-                })
+        content = f.read().strip()
+    if not content:
+        return []
+    if content.startswith("["):
+        return json.loads(content)
+
+    decisions = []
+    for line in content.splitlines():
+        parts = line.strip().split('\t')
+        if len(parts) >= 4:
+            decisions.append({
+                'start': float(parts[0]),
+                'end': float(parts[1]),
+                'enhancement_type': parts[2],
+                'text': parts[3],
+                'reason': 'cached'
+            })
     return decisions
 
 

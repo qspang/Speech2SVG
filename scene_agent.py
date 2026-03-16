@@ -8,17 +8,25 @@ Scene Agent
 import os
 import numpy as np
 from typing import List, Dict, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from multimodal_utils import save_scene_analysis, load_scene_analysis, create_fallback_scene_analysis
 
 
 class SceneAgent:
     """场景分析Agent - 提取深层视觉特征"""
     
-    def __init__(self, video_path: str, output_dir: str, llm_type: str = "claude-sonnet-4-5-20250929"):
+    def __init__(
+        self,
+        video_path: str,
+        output_dir: str,
+        llm_type: str = "claude-sonnet-4-5-20250929",
+        max_workers: int = 1
+    ):
         """初始化"""
         self.video_path = video_path
         self.output_dir = output_dir
         self.llm_type = llm_type
+        self.max_workers = max(1, max_workers)
         self.scene_cache_path = os.path.join(output_dir, "scene_analysis.txt")
     
     def analyze_scenes(
@@ -29,41 +37,61 @@ class SceneAgent:
         """深度场景分析"""
         scene_info = {}
         cache_valid = False
+        cache_complete = False
         
         if not force and os.path.exists(self.scene_cache_path):
             print(f"  > Checking cached scene analysis...")
             try:
                 cached_data = load_scene_analysis(self.scene_cache_path)
-                # Check if cache is from the new "Art Style" version
-                first_key = next(iter(cached_data))
-                if 'design_guide' in cached_data[first_key] and \
-                   'art_style_name' in cached_data[first_key]['design_guide']:
-                    print(f"  > Cache is up-to-date. Loading.")
-                    scene_info = cached_data
-                    cache_valid = True
+                if cached_data:
+                    first_key = next(iter(cached_data))
+                    if 'design_guide' in cached_data[first_key] and \
+                       'art_style_name' in cached_data[first_key]['design_guide']:
+                        scene_info = cached_data
+                        cache_valid = True
+                        cache_complete = len(scene_info) >= len(enhancement_points)
+                        if cache_complete:
+                            print(f"  > Cache is up-to-date. Loading.")
+                        else:
+                            print(f"  > Partial scene cache found: {len(scene_info)}/{len(enhancement_points)} complete. Resuming.")
+                    else:
+                        print(f"  > Cache is stale (missing Art Style). Re-analyzing.")
                 else:
-                    print(f"  > Cache is stale (missing Art Style). Re-analyzing.")
+                    print(f"  > Cache empty. Re-analyzing.")
             except:
                 print(f"  > Cache corrupted. Re-analyzing.")
 
-        if not cache_valid:
-            print(f"  > Deep visual feature extraction (Art Style Edition)...")
-            scene_info = {}
+        if not cache_valid or not cache_complete:
+            print(f"  > Deep visual feature extraction (Art Style Edition, workers={self.max_workers})...")
+            completed = 0
+            total = len(enhancement_points)
+            pending_indices = [idx for idx in range(total) if str(idx) not in scene_info]
+            pending_total = len(pending_indices)
+
+            if self.max_workers <= 1:
+                for idx in pending_indices:
+                    point = enhancement_points[idx]
+                    result_idx, analysis = self._analyze_point(idx, point)
+                    scene_info[str(result_idx)] = analysis
+                    completed += 1
+                    if completed % 5 == 0 or completed == pending_total:
+                        self._save_checkpoint(scene_info)
+                    print(f"    > Scene progress: {completed}/{pending_total}")
+            else:
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    futures = {
+                        executor.submit(self._analyze_point, idx, enhancement_points[idx]): idx
+                        for idx in pending_indices
+                    }
+                    for future in as_completed(futures):
+                        idx, analysis = future.result()
+                        scene_info[str(idx)] = analysis
+                        completed += 1
+                        if completed % 5 == 0 or completed == pending_total:
+                            self._save_checkpoint(scene_info)
+                        print(f"    > Scene progress: {completed}/{pending_total}")
             
-            for idx, point in enumerate(enhancement_points):
-                ts_start = point['timestamp']
-                ts_end = point['timestamp'] + point['duration']
-                
-                # 获取 layout 中的局部区域上下文（来自 layout_agent）
-                region_context = point.get('layout', {}).get('region_context', {})
-                
-                analysis = self._analyze_time_range(ts_start, ts_end, region_context)
-                scene_info[str(idx)] = analysis
-                
-                print(f"    [{idx+1}] {ts_start:.1f}s: "
-                      f"Style={analysis['design_guide'].get('art_style_name', 'Unknown')}")
-            
-            save_scene_analysis(scene_info, self.scene_cache_path)
+            self._save_checkpoint(scene_info)
         
         # 添加场景信息到增强点
         for idx, point in enumerate(enhancement_points):
@@ -71,6 +99,18 @@ class SceneAgent:
         
         print(f"  ✓ Deep scene analysis complete")
         return enhancement_points
+
+    def _save_checkpoint(self, scene_info: Dict):
+        save_scene_analysis(scene_info, self.scene_cache_path)
+
+    def _analyze_point(self, idx: int, point: Dict):
+        ts_start = point['timestamp']
+        ts_end = point['timestamp'] + point['duration']
+        region_context = point.get('layout', {}).get('region_context', {})
+        analysis = self._analyze_time_range(ts_start, ts_end, region_context)
+        print(f"    [{idx+1}] {ts_start:.1f}s: "
+              f"Style={analysis['design_guide'].get('art_style_name', 'Unknown')}")
+        return idx, analysis
     
     def _analyze_time_range(self, start_time: float, end_time: float, region_context: Dict = None) -> Dict:
         """深度分析时间范围（含局部区域上下文）"""
@@ -86,15 +126,14 @@ class SceneAgent:
             num_samples = min(7, max(3, int(duration * 3)))
             sample_times = np.linspace(start_time, end_time, num=num_samples)
             
-            import concurrent.futures
-            
             # 使用多线程并发提取当前时间段内的帧
-            with concurrent.futures.ThreadPoolExecutor(max_workers=num_samples) as executor:
+            frame_workers = min(num_samples, 2 if self.max_workers > 1 else 3)
+            with ThreadPoolExecutor(max_workers=frame_workers) as executor:
                 # 提交所有抽帧任务 (保留时间戳以便后续需要排序)
                 future_to_time = {executor.submit(self._extract_frame_ffmpeg, t): t for t in sample_times}
                 
                 # 收集结果
-                for future in concurrent.futures.as_completed(future_to_time):
+                for future in as_completed(future_to_time):
                     frame = future.result()
                     if frame is not None:
                         frames.append(frame)
@@ -152,10 +191,11 @@ class SceneAgent:
         """通过 FFmpeg 截取单帧图像（避免 OpenCV AV1 解码问题）"""
         import tempfile
         import subprocess
+        import uuid
         import cv2
         
         temp_dir = tempfile.gettempdir()
-        temp_img = os.path.join(temp_dir, f"scene_frame_{timestamp:.2f}.jpg")
+        temp_img = os.path.join(temp_dir, f"scene_frame_{timestamp:.2f}_{uuid.uuid4().hex}.jpg")
         
         try:
             cmd = [
@@ -166,7 +206,7 @@ class SceneAgent:
                 temp_img
             ]
             subprocess.run(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=6
             )
             
             if os.path.exists(temp_img):

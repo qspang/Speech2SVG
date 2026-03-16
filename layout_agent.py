@@ -9,14 +9,19 @@ import os
 import cv2
 import numpy as np
 from typing import List, Dict, Any, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class LayoutProcessor:
     """布局处理器 - 全图智能搜索"""
     
-    def __init__(self, video_path: str):
+    def __init__(self, video_path: str, max_workers: int = 1):
         """初始化"""
         self.video_path = video_path
+        self.max_workers = max(1, max_workers)
+        self._face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
     
     def calculate_layouts(
         self,
@@ -31,44 +36,43 @@ class LayoutProcessor:
             print(f"  > Loading cached layouts from {layout_cache_path}")
             return self._load_cached_layouts(decisions, layout_cache_path)
         
-        print(f"  > Calculating layouts with full-screen search + temporal detection...")
+        print(f"  > Calculating layouts with full-screen search + temporal detection (workers={self.max_workers})...")
         
         enhancement_points = []
         layouts = []
+        completed = 0
+        total = len([dec for dec in decisions if dec['enhancement_type'] != 'none'])
         
-        for idx, dec in enumerate(decisions):
-            if dec['enhancement_type'] == 'none':
-                continue
-            
-            start_time = dec['start']
-            duration = dec['end'] - dec['start']
-            
-            # 全图搜索 + 多帧时域检测 + 降级评估
-            layout = self.calculate_single_layout(start_time, duration, dec['enhancement_type'])
-            
-            # 如果算法果断判定没有空间，强制舍弃该叠加图点
-            if layout is None:
+        candidates = [(idx, dec) for idx, dec in enumerate(decisions) if dec['enhancement_type'] != 'none']
+        if self.max_workers <= 1:
+            results = []
+            for idx, dec in candidates:
+                result = self._calculate_layout_for_decision(idx, dec)
+                results.append(result)
+                completed += 1
+                print(f"    > Layout progress: {completed}/{total}")
+        else:
+            results = []
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = {
+                    executor.submit(self._calculate_layout_for_decision, idx, dec): idx
+                    for idx, dec in candidates
+                }
+                for future in as_completed(futures):
+                    result = future.result()
+                    results.append(result)
+                    completed += 1
+                    idx = result[0]
+                    start_time = result[2]
+                    print(f"    > Layout progress: {completed}/{total} (segment #{idx+1} @ {start_time:.1f}s)")
+
+        for result in sorted(results, key=lambda item: item[0]):
+            idx, point, start_time, layout = result
+            if point is None:
                 print(f"    [{idx+1}] {start_time:.1f}s: (已舍弃 - 无安全放置空间)")
                 continue
-            
-            # 如果降级发生了改变，由于是动态的，所以根据返回的宽高修正 content_type
-            final_type = dec['enhancement_type']
-            if layout['width'] == 350 and layout['height'] == 200 and final_type == 'svg':
-                final_type = 'text_card' # SVG被降级为文字
-                
-            point = {
-                'timestamp': dec['start'],
-                'duration': duration,
-                'content_type': 'svg_animation' if final_type == 'svg' else 'text_card',
-                'text': dec['text'],
-                'enhancement_type': final_type,
-                'layout': layout,
-                'metadata': {'start': dec['start'], 'end': dec['end']}
-            }
-            
             enhancement_points.append(point)
             layouts.append({'timestamp': start_time, 'layout': layout})
-            
             print(f"    [{idx+1}] {start_time:.1f}s: ({layout['x']}, {layout['y']}) "
                   f"score={layout['safety_score']:.2f}")
         
@@ -76,6 +80,34 @@ class LayoutProcessor:
         print(f"  ✓ Calculated {len(enhancement_points)} layouts")
         
         return enhancement_points
+
+    def _calculate_layout_for_decision(self, idx: int, dec: Dict):
+        start_time = dec['start']
+        duration = dec['end'] - dec['start']
+        layout = self.calculate_single_layout(start_time, duration, dec['enhancement_type'])
+        if layout is None:
+            return idx, None, start_time, None
+
+        final_type = dec['enhancement_type']
+        if layout['width'] == 350 and layout['height'] == 200 and final_type in ('svg', 'mechanism_chain', 'misconception'):
+            final_type = 'text_card'
+
+        point = {
+            'timestamp': dec['start'],
+            'duration': duration,
+            'content_type': self._map_enhancement_to_content_type(final_type),
+            'text': dec['text'],
+            'enhancement_type': final_type,
+            'layout': layout,
+            'metadata': {
+                'start': dec['start'],
+                'end': dec['end'],
+                'confusion_risk': dec.get('confusion_risk'),
+                'misconception_payload': dec.get('misconception_payload'),
+                'mechanism_payload': dec.get('mechanism_payload'),
+            }
+        }
+        return idx, point, start_time, layout
     
     def calculate_single_layout(
         self,
@@ -94,10 +126,19 @@ class LayoutProcessor:
             
             # 提取多帧
             frames = []
-            for t in sample_times:
-                frame = self._extract_frame_at_timestamp(t)
-                if frame is not None:
-                    frames.append(frame)
+            if self.max_workers > 1:
+                for t in sample_times:
+                    frame = self._extract_frame_at_timestamp(t)
+                    if frame is not None:
+                        frames.append(frame)
+            else:
+                frame_workers = min(len(sample_times), 2)
+                with ThreadPoolExecutor(max_workers=frame_workers) as executor:
+                    futures = [executor.submit(self._extract_frame_at_timestamp, t) for t in sample_times]
+                    for future in as_completed(futures):
+                        frame = future.result()
+                        if frame is not None:
+                            frames.append(frame)
             
             if not frames:
                 return self._create_fallback_layout(content_type)
@@ -113,6 +154,14 @@ class LayoutProcessor:
     
     def _get_sample_times(self, start_time: float, duration: float) -> List[float]:
         """获取采样时间点（头、中、尾）"""
+        if self.max_workers > 1:
+            if duration < 1.0:
+                return [start_time]
+            return [
+                start_time,
+                start_time + duration * 0.5,
+                start_time + duration
+            ]
         if duration < 1.0:
             return [start_time]
         elif duration < 3.0:
@@ -141,6 +190,10 @@ class LayoutProcessor:
         if overlay_w is None or overlay_h is None:
             if content_type == 'svg':
                 overlay_w, overlay_h = 640, 360
+            elif content_type == 'mechanism_chain':
+                overlay_w, overlay_h = 760, 260
+            elif content_type == 'misconception':
+                overlay_w, overlay_h = 420, 240
             else:
                 overlay_w, overlay_h = 350, 200
                 
@@ -167,6 +220,12 @@ class LayoutProcessor:
             if content_type == 'svg':
                 print(f"      [!] 空间不足放置 {overlay_w}x{overlay_h} SVG. 尝试降级为较小的文字卡片.")
                 return self._full_screen_search(frames, 'text_card', 350, 200)
+            elif content_type == 'mechanism_chain':
+                print(f"      [!] 机制链空间不足，降级为文字卡片.")
+                return self._full_screen_search(frames, 'text_card', 350, 200)
+            elif content_type == 'misconception':
+                print(f"      [!] 误解纠正卡空间不足，尝试普通文字卡片.")
+                return self._full_screen_search(frames, 'text_card', 350, 200)
             else:
                 print(f"      [!] 当前画面过于拥挤密集或都是人脸特写，完全找不到合适放置区. 策略：放弃此浮层.")
                 return None
@@ -191,6 +250,15 @@ class LayoutProcessor:
             'safety_score': float(safety_score),
             'region_context': region_context
         }
+
+    def _map_enhancement_to_content_type(self, enhancement_type: str) -> str:
+        if enhancement_type == 'svg':
+            return 'svg_animation'
+        if enhancement_type == 'mechanism_chain':
+            return 'mechanism_chain'
+        if enhancement_type == 'misconception':
+            return 'misconception_card'
+        return 'text_card'
 
     def _generate_energy_field(self, frame) -> np.ndarray:
         """生成单帧的基础能量场地图 (Height x Width)"""
@@ -277,9 +345,10 @@ class LayoutProcessor:
         """提取指定时间戳的帧（通过 FFmpeg 截取图像避免 OpenCV 解码崩溃）"""
         import tempfile
         import subprocess
+        import uuid
         
         temp_dir = tempfile.gettempdir()
-        temp_img = os.path.join(temp_dir, f"frame_{timestamp}.jpg")
+        temp_img = os.path.join(temp_dir, f"frame_{timestamp}_{uuid.uuid4().hex}.jpg")
         
         try:
             # 使用 FFmpeg 快速提取 timestamp 时的一帧为 JPG
@@ -291,7 +360,7 @@ class LayoutProcessor:
                 temp_img
             ]
             subprocess.run(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=6
             )
             
             if os.path.exists(temp_img):
@@ -317,11 +386,8 @@ class LayoutProcessor:
     def _detect_faces(self, frame):
         """人脸检测"""
         try:
-            face_cascade = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-            )
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+            faces = self._face_cascade.detectMultiScale(gray, 1.3, 5)
             return [{'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h)} 
                    for (x, y, w, h) in faces]
         except:
@@ -349,7 +415,8 @@ class LayoutProcessor:
             brightnesses = []
             edge_densities = []
             
-            for frame in frames:
+            region_frames = frames[:2] if len(frames) > 2 else frames
+            for frame in region_frames:
                 fh, fw = frame.shape[:2]
                 # 边界安全裁剪
                 rx = max(0, min(x, fw - 1))
@@ -362,8 +429,8 @@ class LayoutProcessor:
                 
                 region = frame[ry:ry+rh, rx:rx+rw]
                 
-                # 降采样到 80x60 加速
-                small = cv2.resize(region, (80, 60))
+                # 降采样到 64x48 加速
+                small = cv2.resize(region, (64, 48))
                 all_pixels.append(small.reshape(-1, 3))
                 
                 # 计算亮度
@@ -383,7 +450,7 @@ class LayoutProcessor:
             
             # KMeans 提取区域 3 主色
             n_colors = min(3, len(pixels) // 10 + 1)
-            kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init=5)
+            kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init=2)
             kmeans.fit(pixels)
             
             colors_bgr = kmeans.cluster_centers_.astype(int)
@@ -503,11 +570,17 @@ class LayoutProcessor:
                 point = {
                     'timestamp': dec['start'],
                     'duration': dec['end'] - dec['start'],
-                    'content_type': 'svg_animation' if dec['enhancement_type'] == 'svg' else 'text_card',
+                    'content_type': self._map_enhancement_to_content_type(dec['enhancement_type']),
                     'text': dec['text'],
                     'enhancement_type': dec['enhancement_type'],
                     'layout': layout,
-                    'metadata': {'start': dec['start'], 'end': dec['end']}
+                    'metadata': {
+                        'start': dec['start'],
+                        'end': dec['end'],
+                        'confusion_risk': dec.get('confusion_risk'),
+                        'misconception_payload': dec.get('misconception_payload'),
+                        'mechanism_payload': dec.get('mechanism_payload'),
+                    }
                 }
                 points.append(point)
             
@@ -517,8 +590,15 @@ class LayoutProcessor:
             return [{
                 'timestamp': dec['start'],
                 'duration': dec['end'] - dec['start'],
-                'content_type': 'svg_animation' if dec['enhancement_type'] == 'svg' else 'text_card',
+                'content_type': self._map_enhancement_to_content_type(dec['enhancement_type']),
                 'text': dec['text'],
+                'enhancement_type': dec['enhancement_type'],
                 'layout': self._create_fallback_layout(dec['enhancement_type']),
-                'metadata': {'start': dec['start'], 'end': dec['end']}
+                'metadata': {
+                    'start': dec['start'],
+                    'end': dec['end'],
+                    'confusion_risk': dec.get('confusion_risk'),
+                    'misconception_payload': dec.get('misconception_payload'),
+                    'mechanism_payload': dec.get('mechanism_payload'),
+                }
             } for dec in decisions if dec['enhancement_type'] != 'none']

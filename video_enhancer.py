@@ -22,7 +22,12 @@ class VideoEnhancer:
         llm_type: str = "claude-sonnet-4-5-20250929",
         vision_llm_type: str = "claude-sonnet-4-5-20250929",
         svg_mode: str = "simple",
-        max_workers: int = 1
+        max_workers: int = 1,
+        layout_max_workers: int = 1,
+        scene_max_workers: int = 1,
+        enable_misconception: bool = False,
+        enable_mechanism_chain: bool = False,
+        enable_concept_graph: bool = False,
     ):
         """
         初始化
@@ -41,6 +46,11 @@ class VideoEnhancer:
         self.vision_llm_type = vision_llm_type
         self.svg_mode = svg_mode
         self.max_workers = max(1, max_workers)
+        self.layout_max_workers = max(1, layout_max_workers)
+        self.scene_max_workers = max(1, scene_max_workers)
+        self.enable_misconception = enable_misconception
+        self.enable_mechanism_chain = enable_mechanism_chain
+        self.enable_concept_graph = enable_concept_graph
         
         # 创建输出目录（不使用时间戳）
         video_name = Path(video_path).stem
@@ -57,6 +67,8 @@ class VideoEnhancer:
         print(f"  Vision LLM: {vision_llm_type}")
         print(f"  SVG Generation Mode: {svg_mode.capitalize()}")
         print(f"  Max Workers: {self.max_workers}")
+        print(f"  Layout Workers: {self.layout_max_workers}")
+        print(f"  Scene Workers: {self.scene_max_workers}")
     
     def process(self, force_reprocess: bool = False) -> str:
         """
@@ -85,7 +97,12 @@ class VideoEnhancer:
             llm_type=self.llm_type,
             vision_llm_type=self.vision_llm_type,
             svg_mode=self.svg_mode,
-            max_workers=self.max_workers
+            max_workers=self.max_workers,
+            layout_max_workers=self.layout_max_workers,
+            scene_max_workers=self.scene_max_workers,
+            enable_misconception=self.enable_misconception,
+            enable_mechanism_chain=self.enable_mechanism_chain,
+            enable_concept_graph=self.enable_concept_graph,
         )
         
         # Phase 1-5: 分析流程
@@ -106,7 +123,8 @@ class VideoEnhancer:
         html_generator.generate_skeleton(
             video_source=self.video_path,
             transcript_path=transcript_path,
-            html_path=html_path
+            html_path=html_path,
+            concept_graph=analyzer.global_concept_graph
         )
         
         print(f"  ✓ HTML skeleton ready: {html_path}")
@@ -157,6 +175,18 @@ def main():
                         help='SVG Generation mode (default: simple)')
     parser.add_argument('--max-workers', type=int, default=1, dest='max_workers',
                         help='Max concurrent workers for content generation (default: 1 = sequential)')
+    parser.add_argument('--layout-max-workers', type=int, default=1, dest='layout_max_workers',
+                        help='Max concurrent workers for layout analysis')
+    parser.add_argument('--scene-max-workers', type=int, default=1, dest='scene_max_workers',
+                        help='Max concurrent workers for scene analysis')
+    parser.add_argument('--enable-misconception', action='store_true',
+                        help='Enable misconception correction cards')
+    parser.add_argument('--enable-mechanism-chain', action='store_true',
+                        help='Enable mechanism chain overlays')
+    parser.add_argument('--enable-concept-graph', action='store_true',
+                        help='Enable persistent global concept graph panel')
+    parser.add_argument('--force-reprocess', action='store_true',
+                        help='Ignore caches and recompute all analysis stages')
     
     args = parser.parse_args()
     
@@ -171,10 +201,15 @@ def main():
         llm_type=args.llm_type,
         vision_llm_type=args.vision_llm_type,
         svg_mode=args.svg_mode,
-        max_workers=args.max_workers
+        max_workers=args.max_workers,
+        layout_max_workers=args.layout_max_workers,
+        scene_max_workers=args.scene_max_workers,
+        enable_misconception=args.enable_misconception,
+        enable_mechanism_chain=args.enable_mechanism_chain,
+        enable_concept_graph=args.enable_concept_graph,
     )
     
-    html_path = enhancer.process()
+    html_path = enhancer.process(force_reprocess=args.force_reprocess)
     
     print(f"\n✓ Open {html_path} in browser")
     return 0
