@@ -575,7 +575,7 @@ class HTMLGenerator:
                     connector = f'<div class="{connector_class}"><span class="mechanism-connector-line"></span><span class="mechanism-connector-dot"></span></div>' if idx < len(stages) - 1 else ''
                     stage_html.append(
                         f'<div class="mechanism-path-segment">'
-                        f'<div class="{cls}"><span class="stage-index">STEP {idx + 1}</span><span class="mechanism-stage-text">{html_module.escape(str(stage))}</span></div>'
+                        f'<div class="{cls} node-stage"><div class="mechanism-node-core"></div><div class="mechanism-node-copy"><span class="stage-index">STEP {idx + 1}</span><span class="mechanism-stage-text">{html_module.escape(str(stage))}</span></div></div>'
                         f'{connector}'
                         f'</div>'
                     )
@@ -1169,36 +1169,63 @@ class HTMLGenerator:
 
         .mechanism-stage {
             display: flex;
-            flex-direction: column;
             gap: 8px;
-            min-height: 96px;
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.08);
-            background: rgba(255,255,255,0.05);
             color: rgba(255,255,255,0.82);
             min-width: 0;
             flex: 1 1 0;
             animation: mechanismReveal 0.7s ease forwards;
         }
 
+        .node-stage {
+            align-items: center;
+        }
+
+        .mechanism-node-core {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.16);
+            border: 2px solid rgba(34,211,238,0.35);
+            box-shadow: 0 0 0 6px rgba(34,211,238,0.06);
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .mechanism-node-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-left: 10px;
+            min-width: 0;
+            padding: 10px 12px 10px 0;
+        }
+
         .mechanism-stage.active {
-            border-color: var(--card-accent, #6366f1);
-            background: rgba(99, 102, 241, 0.18);
             color: #ffffff;
-            box-shadow: 0 0 0 1px rgba(99,102,241,0.15) inset;
+        }
+
+        .mechanism-stage.active .mechanism-node-core {
+            background: #67e8f9;
+            border-color: #a5f3fc;
+            box-shadow: 0 0 0 8px rgba(34,211,238,0.10), 0 0 22px rgba(103,232,249,0.75);
+            animation: mechanismPulse 1.5s ease-in-out infinite;
         }
 
         .mechanism-stage.completed {
-            border-color: rgba(34,211,238,0.45);
-            background: rgba(34,211,238,0.10);
             color: rgba(255,255,255,0.92);
+        }
+
+        .mechanism-stage.completed .mechanism-node-core {
+            background: rgba(34,211,238,0.78);
+            border-color: rgba(103,232,249,0.9);
+            box-shadow: 0 0 0 7px rgba(34,211,238,0.08), 0 0 16px rgba(34,211,238,0.28);
         }
 
         .mechanism-stage-text {
             overflow-wrap: break-word;
             word-break: normal;
             line-height: 1.45;
+            font-size: calc(14px * var(--overlay-scale, 1));
         }
 
         .stacked-stage {
@@ -1218,7 +1245,7 @@ class HTMLGenerator:
             display: block;
             width: 100%;
             height: 2px;
-            background: linear-gradient(90deg, rgba(34,211,238,0.15), rgba(34,211,238,0.9));
+            background: linear-gradient(90deg, rgba(34,211,238,0.08), rgba(34,211,238,0.24));
             transform-origin: left center;
             animation: mechanismFlow 1.1s ease forwards;
         }
@@ -1226,11 +1253,11 @@ class HTMLGenerator:
         .mechanism-connector-dot {
             position: absolute;
             right: -1px;
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            background: #22d3ee;
-            box-shadow: 0 0 18px rgba(34,211,238,0.6);
+            background: rgba(34,211,238,0.35);
+            box-shadow: 0 0 10px rgba(34,211,238,0.22);
         }
 
         .mechanism-connector.active .mechanism-connector-line {
@@ -1711,6 +1738,11 @@ class HTMLGenerator:
         @keyframes mechanismFlow {
             from { transform: scaleX(0); opacity: 0.4; }
             to { transform: scaleX(1); opacity: 1; }
+        }
+
+        @keyframes mechanismPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.12); }
         }
 
         @keyframes misconceptionShift {
