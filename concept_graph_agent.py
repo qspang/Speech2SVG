@@ -148,7 +148,7 @@ Rules:
 - Keep names short and canonical.
 """
             prompt = f"""Global summary:
-{global_summary[:1200]}
+{global_summary}
 
 Previous context:
 {prev_text}

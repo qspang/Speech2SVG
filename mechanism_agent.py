@@ -136,7 +136,7 @@ Only accept if the segment itself contains operational progression such as:
 Prefer stages that are concrete and action-bearing, but concise abstract stages are acceptable if they clearly describe progression.
 """
             prompt = f"""Global summary:
-{global_summary[:1200]}
+{global_summary}
 
 Target context:
 {combined}

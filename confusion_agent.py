@@ -142,7 +142,7 @@ Do NOT mark high risk just because the content is difficult or technical.
 Do mark moderate-to-high risk when the segment is understandable at a surface level but likely to leave a subtly wrong mental model.
 """
             prompt = f"""Global summary:
-{global_summary[:1200]}
+{global_summary}
 
 Previous: {prev_text}
 Current: {text}
