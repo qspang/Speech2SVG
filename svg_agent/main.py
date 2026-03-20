@@ -18,6 +18,7 @@ def generate_svg_from_text(
     vision_llm_type: str = None,
     layout_context: Optional[Dict] = None,
     scene_context: Optional[Dict] = None,
+    motion_context: Optional[Dict] = None,
     enable_complex_mode: bool = False,
     sample_id: str = "svg_output"
 ) -> Dict[str, Any]:

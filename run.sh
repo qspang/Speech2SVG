@@ -30,26 +30,24 @@ conda activate svg
 #     --max-workers 10 \
 #     "$@"
 
-python video_enhancer.py /home/ubuntu/sysu/svgagent/video/lx.mp4 \
-    --llm glm-5 \
-    --vision-llm qwen3.5-plus \
-    --max-workers 5 \
-    --svg-mode simple \
-    --layout-max-workers 6 \
-    --scene-max-workers 3 \
-    --enable-misconception \
-    --enable-mechanism-chain \
-    --enable-concept-graph \
-    "$@"
-
 # python video_enhancer.py /home/ubuntu/sysu/svgagent/video/lx.mp4 \
-#     --llm gemini-3.1-pro-high \
-#     --vision-llm gemini-3.1-pro-high \
-#     --svg-mode simple \
+#     --llm glm-5 \
+#     --vision-llm qwen3.5-plus \
 #     --max-workers 5 \
+#     --svg-mode simple \
 #     --layout-max-workers 6 \
 #     --scene-max-workers 3 \
-#     --enable-misconception \
 #     --enable-mechanism-chain \
 #     --enable-concept-graph \
-#     "$@" 
+#     "$@"
+
+python video_enhancer.py /home/ubuntu/sysu/svgagent/video/lx.mp4 \
+    --llm gemini-3.1-pro-high \
+    --vision-llm gemini-3.1-pro-high \
+    --svg-mode simple \
+    --max-workers 5 \
+    --layout-max-workers 6 \
+    --scene-max-workers 3 \
+    --enable-mechanism-chain \
+    --enable-concept-graph \
+    "$@" 

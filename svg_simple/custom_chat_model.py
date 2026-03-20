@@ -162,14 +162,14 @@ class CustomChatModel(BaseChatModel):
                 timeout=DEFAULT_TIMEOUT
             )
             self.streaming = True
-        else:
-            self.client = OpenAI(
-                api_key=os.getenv("OPENAI_API_KEY_YI"),
-                base_url="http://api.apiyi.com/v1",
-                timeout=DEFAULT_TIMEOUT
-            )
-            self.streaming = True
-            self.use_developer_role = True
+        # else:
+        #     self.client = OpenAI(
+        #         api_key=os.getenv("OPENAI_API_KEY_YI"),
+        #         base_url="http://api.apiyi.com/v1",
+        #         timeout=DEFAULT_TIMEOUT
+        #     )
+        #     self.streaming = True
+        #     self.use_developer_role = True
 
     @property
     def _llm_type(self) -> str:
@@ -571,6 +571,7 @@ class CustomChatModel(BaseChatModel):
             "gpt4-o",
             "qwen-vl-plus",
             "qwen-vl-max",
-            "claude-sonnet-4-5-20250929"
+            "claude-sonnet-4-5-20250929",
+             "gemini-3.1-pro-high", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-5.3-codex", "gemini-3.1-pro-low"
         ]
         return any(vm in self.llm_type.lower() for vm in vision_models)

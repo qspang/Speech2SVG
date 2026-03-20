@@ -16,6 +16,7 @@ HTML Generator - HTML生成器 (重构版)
 import os
 import json
 import html as html_module
+import re
 from typing import List, Dict, Any, Optional
 
 
@@ -64,7 +65,6 @@ class HTMLGenerator:
         overlay_html = self._generate_overlay_html(point, idx)
         # 生成gallery item HTML (画廊缩略图)
         gallery_html = self._generate_gallery_item_html(point, idx)
-        focus_html = self._generate_focus_panel_item_html(point, idx)
         content_type = point.get('content', {}).get('type', 'text')
 
         # 在标记位置插入新内容
@@ -76,17 +76,6 @@ class HTMLGenerator:
             '<!-- GALLERY_MARKER -->',
             gallery_html + '\n                <!-- GALLERY_MARKER -->'
         )
-        if content_type == 'mechanism_chain':
-            html_content = html_content.replace(
-                '<!-- MECHANISM_PANEL_MARKER -->',
-                focus_html + '\n                    <!-- MECHANISM_PANEL_MARKER -->'
-            )
-        elif content_type == 'misconception':
-            html_content = html_content.replace(
-                '<!-- MISCONCEPTION_PANEL_MARKER -->',
-                focus_html + '\n                    <!-- MISCONCEPTION_PANEL_MARKER -->'
-            )
-
         with open(html_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
 
@@ -110,8 +99,6 @@ class HTMLGenerator:
         for idx, point in enumerate(enhancement_points):
             overlay_html = self._generate_overlay_html(point, idx)
             gallery_html = self._generate_gallery_item_html(point, idx)
-            focus_html = self._generate_focus_panel_item_html(point, idx)
-            content_type = point.get('content', {}).get('type', 'text')
 
             html_content = html_content.replace(
                 '<!-- OVERLAY_MARKER -->',
@@ -121,16 +108,6 @@ class HTMLGenerator:
                 '<!-- GALLERY_MARKER -->',
                 gallery_html + '\n                <!-- GALLERY_MARKER -->'
             )
-            if content_type == 'mechanism_chain':
-                html_content = html_content.replace(
-                    '<!-- MECHANISM_PANEL_MARKER -->',
-                    focus_html + '\n                    <!-- MECHANISM_PANEL_MARKER -->'
-                )
-            elif content_type == 'misconception':
-                html_content = html_content.replace(
-                    '<!-- MISCONCEPTION_PANEL_MARKER -->',
-                    focus_html + '\n                    <!-- MISCONCEPTION_PANEL_MARKER -->'
-                )
 
         return html_content
 
@@ -153,7 +130,7 @@ class HTMLGenerator:
     <title>Video Enhancement Studio</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
 {self._generate_css()}
     </style>
@@ -169,8 +146,8 @@ class HTMLGenerator:
                     <path d="M8 18L12 14L16 18L20 14" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
                     <defs>
                         <linearGradient id="logoGrad" x1="0" y1="0" x2="28" y2="28">
-                            <stop stop-color="#6366f1"/>
-                            <stop offset="1" stop-color="#8b5cf6"/>
+                            <stop stop-color="#2f5f98"/>
+                            <stop offset="1" stop-color="#3f7fb8"/>
                         </linearGradient>
                     </defs>
                 </svg>
@@ -178,6 +155,13 @@ class HTMLGenerator:
             </div>
         </div>
         <div class="header-right">
+            <button id="toggleOverlays" class="header-tool-btn active" onclick="toggleOverlays()" title="切换浮层显示">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="1" y="3" width="14" height="10" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                    <rect x="3" y="5" width="5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/>
+                </svg>
+                浮层
+            </button>
             <div class="search-box">
                 <input type="text" id="searchInput" placeholder="搜索字幕内容..." autocomplete="off">
                 <button id="searchBtn" onclick="searchSubtitles()">
@@ -193,10 +177,8 @@ class HTMLGenerator:
     </header>
 
     <!-- ========== Main Content ========== -->
-    <div class="main-content">
-        <!-- Left Panel: Video + Gallery -->
+    <div class="main-content" id="mainContent">
         <div class="left-panel">
-            <!-- Video Section -->
             <div class="video-section">
                 <div class="video-wrapper">
                     <video id="mainVideo" controls>
@@ -208,70 +190,51 @@ class HTMLGenerator:
             <!-- OVERLAY_MARKER -->
                     </div>
                 </div>
-                <!-- Timeline Markers Bar -->
-                <div class="timeline-bar" id="timelineBar">
-                    <div class="timeline-progress" id="timelineProgress"></div>
-                </div>
-                <!-- Video Controls -->
-                <div class="video-controls">
-                    <button id="toggleOverlays" onclick="toggleOverlays()" title="切换浮层显示">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                            <rect x="1" y="3" width="14" height="10" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                            <rect x="3" y="5" width="5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/>
-                        </svg>
-                        浮层
-                    </button>
-                    <span class="video-time" id="videoTimeDisplay">00:00 / 00:00</span>
-                </div>
+
             </div>
-            <div class="insight-row">
-                <div class="focus-panel mechanism-panel">
-                    <div class="focus-panel-header">
-                        <h3>⚙️ 机制链</h3>
-                        <span class="focus-panel-count" id="mechanismCount">0 条</span>
+            <div class="bottom-row">
+                <div class="gallery-section">
+                    <div class="gallery-header">
+                        <h3>增强内容画廊</h3>
+                        <span class="gallery-count" id="galleryCount">0 个增强点</span>
                     </div>
-                    <div class="focus-panel-list" id="mechanismList">
-                    <!-- MECHANISM_PANEL_MARKER -->
+                    <div class="gallery-toolbar">
+                        <div class="gallery-view-chip" id="galleryViewChip">分类模式</div>
+                        <div class="gallery-filter-wrap">
+                            <button class="gallery-filter-btn" id="galleryFilterBtn" onclick="toggleGalleryMenu(event)" title="切换画廊视图">
+                                <span>筛选</span>
+                                <span>⌄</span>
+                            </button>
+                            <div class="gallery-filter-menu" id="galleryFilterMenu">
+                                <button onclick="setTimelineSort('time')">时间排序</button>
+                                <button onclick="setGalleryMode('category')">按分类排序</button>
+                            </div>
+                        </div>
                     </div>
-                    <div class="focus-panel-empty" id="mechanismEmpty">暂无机制链命中</div>
-                </div>
-                <div class="focus-panel misconception-panel">
-                    <div class="focus-panel-header">
-                        <h3>⚠️ 误解纠正</h3>
-                        <span class="focus-panel-count" id="misconceptionCount">0 条</span>
+                    <div class="gallery-viewport" id="galleryViewport"></div>
+                    <div class="gallery-source" id="gallerySource">
+                    <!-- GALLERY_MARKER -->
                     </div>
-                    <div class="focus-panel-list" id="misconceptionList">
-                    <!-- MISCONCEPTION_PANEL_MARKER -->
+                    <div class="gallery-empty" id="galleryEmpty">
+                        <p>等待内容生成中...</p>
+                        <p class="hint">生成的 SVG 与文字内容会显示在这里</p>
                     </div>
-                    <div class="focus-panel-empty" id="misconceptionEmpty">暂无误解纠正命中</div>
                 </div>
             </div>
         </div>
 
-        <!-- Right Panel: Subtitles (Top) & Gallery (Bottom) -->
-        <div class="right-panel">
+        <button class="subtitle-toggle" id="subtitleToggle" onclick="toggleTranscriptPanel()" title="收起/展开字幕面板">
+            <span id="subtitleToggleIcon">→</span>
+        </button>
+
+        <div class="right-panel" id="rightPanel">
             <div class="subtitle-section">
                 <div class="subtitle-header">
-                    <h3>📝 字幕时间线</h3>
+                    <h3>字幕</h3>
                     <span class="subtitle-count">{len(transcript_data)} 条字幕</span>
                 </div>
                 <div class="subtitle-list" id="subtitleList">
 {subtitle_entries_html}
-                </div>
-            </div>
-            
-            <!-- SVG Gallery Section (Moved from left to bottom-right) -->
-            <div class="gallery-section">
-                <div class="gallery-header">
-                    <h3>📊 增强内容画廊</h3>
-                    <span class="gallery-count" id="galleryCount">0 个增强点</span>
-                </div>
-                <div class="gallery-grid" id="galleryGrid">
-                <!-- GALLERY_MARKER -->
-                </div>
-                <div class="gallery-empty" id="galleryEmpty">
-                    <p>⏳ 等待内容生成中...</p>
-                    <p class="hint">生成的SVG动画和文字卡片将显示在此处</p>
                 </div>
             </div>
             {concept_graph_html}
@@ -340,7 +303,8 @@ class HTMLGenerator:
             desired_w_pct = max(width / self.LAYOUT_CANVAS_W * 100, 22.0)
             available_right_pct = max(16.0, 98.0 - left_pct)
             fit_w_pct = min(desired_w_pct, available_right_pct)
-            h_pct_max = max(height / self.LAYOUT_CANVAS_H * 100 * 2.15, 42.0)
+            available_bottom_pct = max(10.0, 92.0 - top_pct)
+            h_pct_max = min(max(height / self.LAYOUT_CANVAS_H * 100 * 1.55, 22.0), available_bottom_pct)
             scale = max(0.72, min(1.0, fit_w_pct / max(desired_w_pct, 1.0)))
             edge_class = " right-edge-card" if left_pct > 58.0 else ""
             style = (
@@ -374,76 +338,49 @@ class HTMLGenerator:
             </div>'''
 
     def _generate_gallery_item_html(self, point: Dict, idx: int) -> str:
-        """生成单个画廊项目HTML"""
+        """生成单个画廊源数据HTML，由前端JS统一渲染多种视图"""
         content = point.get('content', {})
         content_type = content.get('type', 'text')
         timestamp = point.get('timestamp', 0)
-        time_str = self._format_time(timestamp)
-        topic = point.get('text', '')[:50]
-        escaped_topic = html_module.escape(topic)
+        topic = (point.get('text', '') or '')[:120]
+        svg_path = content.get('path', '')
+        svg_mode_hint = point.get('svg_mode_hint', point.get('metadata', {}).get('svg_mode_hint', 'static_svg'))
 
-        if content_type == 'svg':
-            svg_path = content.get('path', '')
-            # 缩略图使用img标签加载外部文件，大幅缩小HTML体积
-            if svg_path:
-                thumb_html = f'<div class="gallery-thumb svg-thumb"><img src="{svg_path}" loading="lazy" style="width: 100%; height: 100%; object-fit: contain;"></div>'
-            else:
-                thumb_html = '<div class="gallery-thumb svg-thumb placeholder-thumb">SVG</div>'
-
-            return f'''                <div class="gallery-item" data-start="{timestamp}"
-                     onclick="jumpTo({timestamp})"
-                     ondblclick="previewSvg({idx})"
-                     title="{escaped_topic}&#10;单击跳转 | 双击预览">
-                    {thumb_html}
-                    <div class="gallery-info">
-                        <span class="gallery-time">{time_str}</span>
-                        <span class="gallery-label">🎨 SVG</span>
-                    </div>
-                </div>'''
-        elif content_type == 'mechanism_chain':
-            title = html_module.escape(content.get('chain_title', topic)[:34])
-            return f'''                <div class="gallery-item mechanism-gallery-item" data-start="{timestamp}"
-                     onclick="jumpTo({timestamp})"
-                     title="{escaped_topic}">
-                    <div class="gallery-thumb text-thumb mechanism-thumb">
-                        <span class="text-thumb-icon">⚙️</span>
-                        <span class="text-thumb-title">{title}</span>
-                    </div>
-                    <div class="gallery-info">
-                        <span class="gallery-time">{time_str}</span>
-                        <span class="gallery-label">机制链</span>
-                    </div>
-                </div>'''
-        elif content_type == 'misconception':
-            title = html_module.escape(content.get('hero_text', topic)[:34])
-            return f'''                <div class="gallery-item misconception-gallery-item" data-start="{timestamp}"
-                     onclick="jumpTo({timestamp})"
-                     title="{escaped_topic}">
-                    <div class="gallery-thumb text-thumb misconception-thumb">
-                        <span class="text-thumb-icon">⚠️</span>
-                        <span class="text-thumb-title">{title}</span>
-                    </div>
-                    <div class="gallery-info">
-                        <span class="gallery-time">{time_str}</span>
-                        <span class="gallery-label">误解纠正</span>
-                    </div>
-                </div>'''
+        if content_type == 'mechanism_chain':
+            category = 'mechanism'
+            display_type = '机制链'
+            title = content.get('chain_title', topic)[:60]
+            summary = " → ".join(str(stage) for stage in content.get('stages', [])[:3])[:160]
+            icon = '⚙'
+        elif content_type == 'svg':
+            category = 'image'
+            display_type = '图片'
+            title = content.get('title', topic)[:60] or topic[:60]
+            summary = content.get('subtitle', point.get('text', ''))[:160]
+            icon = '🖼'
         else:
-            title = content.get('title', topic)[:30]
-            escaped_title = html_module.escape(title)
+            category = 'text'
+            display_type = '文字'
+            title = content.get('title', topic)[:60] or topic[:60]
+            summary = content.get('explanation', point.get('text', ''))[:160]
+            icon = '文'
 
-            return f'''                <div class="gallery-item text-gallery-item" data-start="{timestamp}"
-                     onclick="jumpTo({timestamp})"
-                     title="{escaped_topic}">
-                    <div class="gallery-thumb text-thumb">
-                        <span class="text-thumb-icon">📝</span>
-                        <span class="text-thumb-title">{escaped_title}</span>
-                    </div>
-                    <div class="gallery-info">
-                        <span class="gallery-time">{time_str}</span>
-                        <span class="gallery-label">文字</span>
-                    </div>
-                </div>'''
+        attrs = {
+            'data-idx': str(idx),
+            'data-start': str(timestamp),
+            'data-category': category,
+            'data-display-type': display_type,
+            'data-title': title,
+            'data-summary': summary,
+            'data-icon': icon,
+            'data-svg-path': svg_path,
+            'data-svg-mode': svg_mode_hint,
+            'data-topic': point.get('text', '')[:200],
+        }
+        attr_html = " ".join(
+            f'{key}="{html_module.escape(value, quote=True)}"' for key, value in attrs.items()
+        )
+        return f'                <div class="gallery-source-item" {attr_html}></div>'
 
     def _generate_focus_panel_item_html(self, point: Dict, idx: int) -> str:
         content = point.get('content', {})
@@ -485,7 +422,11 @@ class HTMLGenerator:
 
             # 视频浮层使用 object 标签加载，保留SVG内部CSS动画特性
             if svg_path:
-                return f'<object data="{svg_path}" type="image/svg+xml" class="svg-content" style="width: 100%; height: 100%; overflow: hidden; pointer-events: none;"></object>'
+                return (
+                    f'<div class="svg-shell">'
+                    f'<object data="{svg_path}" type="image/svg+xml" class="svg-content" style="width: 100%; height: 100%; overflow: hidden; pointer-events: none;"></object>'
+                    f'</div>'
+                )
             else:
                 return '<div class="placeholder">SVG Content</div>'
 
@@ -559,6 +500,9 @@ class HTMLGenerator:
             stages = content.get('stages', [])
             current_focus = int(content.get('current_focus_stage', 0))
             variant = content.get('variant', 'path')
+            layout_width = point.get('layout', {}).get('width', 0)
+            if layout_width and (layout_width < 620 or any(len(str(stage)) > 22 for stage in stages)):
+                variant = 'stacked'
             stage_html = []
             for idx, stage in enumerate(stages):
                 cls = 'mechanism-stage'
@@ -591,14 +535,17 @@ class HTMLGenerator:
         return '<div class="placeholder">Content</div>'
 
     def _generate_concept_graph_html(self, concept_graph: Dict) -> str:
-        if not concept_graph or not concept_graph.get('nodes'):
-            return ''
+        def _clean_md(text: str, fallback: str) -> str:
+            raw = str(text or fallback).strip()
+            raw = re.sub(r'^\s*#+\s*', '', raw)
+            raw = raw.replace('**', '')
+            return html_module.escape(raw.strip() or fallback)
 
-        title = html_module.escape(concept_graph.get('graph_title', 'Global Concept Graph'))
-        summary = html_module.escape(concept_graph.get('summary', ''))
+        title = _clean_md(concept_graph.get('graph_title', 'Main Topic'), 'Main Topic')
+        summary = _clean_md(concept_graph.get('summary', '暂无概念图摘要'), '暂无概念图摘要')
         nodes_html = []
         for node in concept_graph.get('nodes', []):
-            label = html_module.escape(node.get('label', 'Node'))
+            label = _clean_md(node.get('label', 'Node'), 'Node')
             node_id = html_module.escape(node.get('id', ''))
             nodes_html.append(
                 f'<div class="concept-node" data-node-id="{node_id}">'
@@ -607,28 +554,22 @@ class HTMLGenerator:
                 f'</div>'
             )
 
-        edges_html = []
-        for edge in concept_graph.get('edges', [])[:6]:
-            edges_html.append(
-                f'<div class="concept-edge" data-source="{html_module.escape(edge.get("source", ""))}" data-target="{html_module.escape(edge.get("target", ""))}">'
-                f'<span class="concept-edge-label">{html_module.escape(edge.get("label", edge.get("source", "")) or "linked")}</span>'
-                f'<span class="concept-edge-route">{html_module.escape(edge.get("source", ""))} → {html_module.escape(edge.get("target", ""))}</span>'
-                f'</div>'
-            )
+        if not nodes_html:
+            nodes_html.append('<div class="concept-empty">暂无概念节点</div>')
 
         return f'''
             <div class="concept-graph-section" id="conceptGraphSection">
                 <div class="concept-graph-header">
-                    <h3>🧠 全局概念图</h3>
+                    <h3>全局概念图</h3>
                     <span class="concept-graph-count">{len(concept_graph.get('nodes', []))} 个节点</span>
                 </div>
-                <div class="concept-graph-title">{title}</div>
-                <div class="concept-graph-summary">{summary}</div>
-                <div class="concept-graph-nodes" id="conceptGraphNodes">
-                    {"".join(nodes_html)}
+                <div class="concept-main-topic">
+                    <div class="concept-main-label">Main Topic</div>
+                    <div class="concept-graph-title">{title}</div>
+                    <div class="concept-graph-summary">{summary}</div>
                 </div>
-                <div class="concept-graph-edges" id="conceptGraphEdges">
-                    {"".join(edges_html)}
+                <div class="concept-node-list" id="conceptGraphNodes">
+                    {"".join(nodes_html)}
                 </div>
             </div>'''
 
@@ -741,27 +682,29 @@ class HTMLGenerator:
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --bg-primary: #0f1117;
-            --bg-secondary: #1a1b25;
-            --bg-tertiary: #22233a;
-            --bg-card: #282940;
-            --border: #2d2e45;
-            --border-light: #3d3e55;
-            --accent: #6366f1;
-            --accent-light: #818cf8;
-            --accent-glow: rgba(99, 102, 241, 0.3);
-            --success: #34d399;
-            --warning: #fbbf24;
-            --text-primary: #f1f1f4;
-            --text-secondary: #9ca3af;
-            --text-muted: #6b7280;
-            --highlight-bg: rgba(99, 102, 241, 0.15);
+            --bg-primary: #ffffff;
+            --bg-secondary: #f3f8fe;
+            --bg-tertiary: #e8f1fb;
+            --bg-card: #ffffff;
+            --border: #d7e6f5;
+            --border-light: #aac6e4;
+            --accent: #4a79ba;
+            --accent-light: #6d98d1;
+            --accent-glow: rgba(74, 121, 186, 0.18);
+            --success: #5d91cb;
+            --warning: #7ea8da;
+            --text-primary: #173756;
+            --text-secondary: #4e6884;
+            --text-muted: #8aa4be;
+            --highlight-bg: rgba(74, 121, 186, 0.10);
             --header-height: 56px;
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: var(--bg-primary);
+            font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(90,146,205,0.12), transparent 26%),
+                linear-gradient(180deg, #fbfdff 0%, #f5f9fd 100%);
             color: var(--text-primary);
             overflow: hidden;
             height: 100vh;
@@ -770,7 +713,8 @@ class HTMLGenerator:
         /* ========== Header ========== */
         .app-header {
             height: var(--header-height);
-            background: var(--bg-secondary);
+            background: rgba(255,255,255,0.92);
+            backdrop-filter: blur(10px);
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
@@ -790,13 +734,36 @@ class HTMLGenerator:
         .logo-text {
             font-size: 16px;
             font-weight: 600;
-            background: linear-gradient(135deg, var(--accent-light), #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            letter-spacing: -0.3px;
+            color: #1b3b5d;
+            letter-spacing: -0.2px;
         }
 
-        .header-right { display: flex; align-items: center; }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-tool-btn {
+            height: 34px;
+            padding: 0 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: #ffffff;
+            color: var(--accent);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            box-shadow: 0 6px 18px rgba(74,121,186,0.08);
+        }
+
+        .header-tool-btn.active {
+            background: #f4f9fe;
+        }
 
         .search-box {
             display: flex;
@@ -807,7 +774,7 @@ class HTMLGenerator:
         .search-box input {
             width: 280px;
             height: 34px;
-            background: var(--bg-tertiary);
+            background: rgba(255,255,255,0.92);
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 0 12px;
@@ -849,7 +816,7 @@ class HTMLGenerator:
         #searchBtn:hover { background: var(--accent-light); }
 
         #clearBtn {
-            background: var(--bg-tertiary);
+            background: #ffffff;
             color: var(--text-secondary);
             border: 1px solid var(--border);
         }
@@ -858,31 +825,81 @@ class HTMLGenerator:
 
         /* ========== Main Layout ========== */
         .main-content {
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1.3fr);
             height: calc(100vh - var(--header-height));
+            position: relative;
         }
 
         .left-panel {
-            width: 66.66%;
             display: grid;
-            grid-template-rows: minmax(0, 75%) minmax(180px, 25%);
+            grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
             border-right: 1px solid var(--border);
             min-width: 0;
+            min-height: 0;
             background: var(--bg-primary);
+            overflow: hidden;
+        }
+
+        .main-content.transcript-collapsed {
+            grid-template-columns: minmax(0, 1fr) 0;
         }
 
         .right-panel {
-            width: 33.33%;
             display: grid;
-            grid-template-rows: minmax(0, 40%) minmax(0, 28%) minmax(200px, 32%);
+            grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
             min-width: 0;
             background: var(--bg-secondary);
+            transition: width 0.25s ease, opacity 0.25s ease, transform 0.25s ease;
+            border-left: 1px solid var(--border);
+            overflow: hidden;
+            gap: 12px;
+            padding: 12px;
+        }
+
+        .main-content.transcript-collapsed .right-panel {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateX(16px);
         }
 
         .subtitle-section {
             display: flex;
             flex-direction: column;
             min-height: 0;
+            height: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            overflow: hidden;
+            box-shadow: 0 10px 28px rgba(74,121,186,0.08);
+        }
+
+        .subtitle-toggle {
+            position: absolute;
+            top: 50%;
+            right: calc(43.33% - 18px);
+            transform: translateY(-50%);
+            width: 36px;
+            height: 36px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,0.96);
+            box-shadow: 0 8px 24px rgba(47,111,178,0.12);
+            color: var(--accent);
+            font-size: 20px;
+            cursor: pointer;
+            z-index: 20;
+            transition: right 0.25s ease, transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .subtitle-toggle:hover {
+            transform: translateY(-50%) scale(1.04);
+            box-shadow: 0 12px 30px rgba(47,111,178,0.18);
+        }
+
+        .main-content.transcript-collapsed .subtitle-toggle {
+            right: 10px;
         }
 
         /* ========== Video Section ========== */
@@ -892,27 +909,31 @@ class HTMLGenerator:
             background: #000;
             border-bottom: 1px solid var(--border);
             min-height: 0;
+            height: 100%;
+            overflow: hidden;
         }
 
-        .insight-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
+        .bottom-row {
+            display: flex;
+            flex-direction: column;
             padding: 12px;
             background: var(--bg-secondary);
             min-height: 0;
+            height: 100%;
+            overflow: hidden;
         }
 
         .video-wrapper {
             flex: 1;
             position: relative;
             overflow: hidden;
+            min-height: 0;
         }
 
         #mainVideo {
             width: 100%;
             height: 100%;
-            object-fit: contain;
+            object-fit: cover;
             background: #000;
         }
 
@@ -979,17 +1000,27 @@ class HTMLGenerator:
             object-fit: contain;
         }
 
-        /* Glassmorphism & Theme - Premium Minimalist Upgrade */
+        .svg-shell {
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(151, 184, 219, 0.42);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.72), 0 14px 32px rgba(47,111,178,0.14);
+            border-radius: 14px;
+            overflow: hidden;
+        }
+
+        /* Scholarly Overlay Theme */
         .premium-glassmorphism {
-            background: rgba(10, 10, 15, 0.45);
-            backdrop-filter: blur(35px) saturate(180%);
-            -webkit-backdrop-filter: blur(35px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-left: 4px solid var(--card-accent, #6366f1);
-            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.88);
+            backdrop-filter: blur(14px) saturate(120%);
+            -webkit-backdrop-filter: blur(14px) saturate(120%);
+            border: 1px solid rgba(151, 184, 219, 0.36);
+            border-left: 4px solid var(--card-accent, #4f7cac);
+            box-shadow: 0 16px 38px rgba(47, 111, 178, 0.12), inset 0 1px 0 rgba(255,255,255,0.72);
             border-radius: 14px;
             padding: 24px 32px;
-            color: #ffffff;
+            color: var(--text-primary);
             transition: all 0.3s ease;
             display: flex;
             flex-direction: column;
@@ -1013,9 +1044,9 @@ class HTMLGenerator:
             font-size: calc(13px * var(--overlay-scale, 1));
             font-weight: 600;
             letter-spacing: 0.5px;
-            color: var(--card-accent, #a78bfa);
+            color: var(--card-accent, #7fa9d6);
             text-transform: uppercase;
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.08);
             padding: 4px 10px;
             border-radius: 20px;
             align-self: flex-start;
@@ -1029,14 +1060,14 @@ class HTMLGenerator:
             letter-spacing: -0.5px;
             margin: 0; 
             text-shadow: 0 2px 10px rgba(0,0,0,0.5);
-            color: #ffffff;
+            color: var(--text-primary);
             overflow-wrap: anywhere;
         }
         
         .card-explanation { 
             font-size: calc(15px * var(--overlay-scale, 1)); 
             line-height: 1.6; 
-            color: rgba(255, 255, 255, 0.75); 
+            color: #45617f;
             margin-top: 4px;
             font-weight: 400;
             overflow-wrap: break-word;
@@ -1138,15 +1169,17 @@ class HTMLGenerator:
         }
 
         .mechanism-title {
-            font-size: calc(22px * var(--overlay-scale, 1));
-            font-weight: 500;
+            font-size: calc(18px * var(--overlay-scale, 1));
+            font-weight: 600;
             line-height: 1.35;
         }
 
         .mechanism-path-track {
-            display: flex;
+            display: grid;
+            grid-auto-flow: column;
+            grid-auto-columns: minmax(0, 1fr);
             align-items: stretch;
-            gap: 8px;
+            gap: 10px;
             margin-top: 10px;
             min-width: 0;
             overflow: hidden;
@@ -1161,71 +1194,77 @@ class HTMLGenerator:
         }
 
         .mechanism-path-segment {
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 28px;
             align-items: center;
             min-width: 0;
-            flex: 1 1 0;
         }
 
         .mechanism-stage {
             display: flex;
-            gap: 8px;
-            color: rgba(255,255,255,0.82);
+            gap: 10px;
+            color: var(--text-primary);
             min-width: 0;
-            flex: 1 1 0;
             animation: mechanismReveal 0.7s ease forwards;
         }
 
         .node-stage {
-            align-items: center;
+            align-items: flex-start;
+            background: #edf4fb;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 12px;
+            min-height: 150px;
         }
 
         .mechanism-node-core {
             width: 18px;
             height: 18px;
             border-radius: 50%;
-            background: rgba(255,255,255,0.16);
-            border: 2px solid rgba(34,211,238,0.35);
-            box-shadow: 0 0 0 6px rgba(34,211,238,0.06);
+            background: rgba(47,111,178,0.12);
+            border: 2px solid rgba(47,111,178,0.45);
+            box-shadow: 0 0 0 6px rgba(47,111,178,0.08);
             flex-shrink: 0;
             position: relative;
+            margin-top: 2px;
         }
 
         .mechanism-node-copy {
             display: flex;
             flex-direction: column;
             gap: 6px;
-            margin-left: 10px;
+            margin-left: 0;
             min-width: 0;
-            padding: 10px 12px 10px 0;
+            padding: 0;
         }
 
         .mechanism-stage.active {
-            color: #ffffff;
+            color: var(--text-primary);
         }
 
         .mechanism-stage.active .mechanism-node-core {
-            background: #67e8f9;
-            border-color: #a5f3fc;
-            box-shadow: 0 0 0 8px rgba(34,211,238,0.10), 0 0 22px rgba(103,232,249,0.75);
+            background: #6da8e6;
+            border-color: #2f6fb2;
+            box-shadow: 0 0 0 8px rgba(47,111,178,0.10), 0 0 22px rgba(47,111,178,0.22);
             animation: mechanismPulse 1.5s ease-in-out infinite;
         }
 
         .mechanism-stage.completed {
-            color: rgba(255,255,255,0.92);
+            color: var(--text-primary);
         }
 
         .mechanism-stage.completed .mechanism-node-core {
-            background: rgba(34,211,238,0.78);
-            border-color: rgba(103,232,249,0.9);
-            box-shadow: 0 0 0 7px rgba(34,211,238,0.08), 0 0 16px rgba(34,211,238,0.28);
+            background: rgba(47,111,178,0.72);
+            border-color: rgba(47,111,178,0.92);
+            box-shadow: 0 0 0 7px rgba(47,111,178,0.08), 0 0 16px rgba(47,111,178,0.22);
         }
 
         .mechanism-stage-text {
             overflow-wrap: break-word;
-            word-break: normal;
+            word-break: break-word;
             line-height: 1.45;
             font-size: calc(14px * var(--overlay-scale, 1));
+            color: var(--text-primary);
         }
 
         .stacked-stage {
@@ -1245,7 +1284,7 @@ class HTMLGenerator:
             display: block;
             width: 100%;
             height: 2px;
-            background: linear-gradient(90deg, rgba(34,211,238,0.08), rgba(34,211,238,0.24));
+            background: linear-gradient(90deg, rgba(47,111,178,0.10), rgba(47,111,178,0.28));
             transform-origin: left center;
             animation: mechanismFlow 1.1s ease forwards;
         }
@@ -1256,18 +1295,18 @@ class HTMLGenerator:
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: rgba(34,211,238,0.35);
-            box-shadow: 0 0 10px rgba(34,211,238,0.22);
+            background: rgba(47,111,178,0.35);
+            box-shadow: 0 0 10px rgba(47,111,178,0.18);
         }
 
         .mechanism-connector.active .mechanism-connector-line {
-            background: linear-gradient(90deg, rgba(34,211,238,0.65), rgba(34,211,238,1));
-            box-shadow: 0 0 14px rgba(34,211,238,0.22);
+            background: linear-gradient(90deg, rgba(47,111,178,0.65), rgba(47,111,178,1));
+            box-shadow: 0 0 14px rgba(47,111,178,0.20);
         }
 
         .mechanism-connector.active .mechanism-connector-dot {
-            background: #67e8f9;
-            box-shadow: 0 0 24px rgba(103,232,249,0.75);
+            background: #6da8e6;
+            box-shadow: 0 0 24px rgba(47,111,178,0.36);
         }
 
         .stage-index {
@@ -1316,14 +1355,15 @@ class HTMLGenerator:
 
         /* Video Controls */
         .video-controls {
-            height: 36px;
+            height: 28px;
             background: var(--bg-secondary);
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-end;
             padding: 0 12px;
             flex-shrink: 0;
         }
+
 
         .video-controls button {
             height: 28px;
@@ -1354,10 +1394,13 @@ class HTMLGenerator:
         .gallery-section {
             display: flex;
             flex-direction: column;
-            background: var(--bg-secondary);
-            overflow: hidden;
-            border-top: 1px solid var(--border);
+            background: var(--bg-card);
+            overflow: visible;
+            border: 1px solid var(--border);
+            border-radius: 18px;
             min-height: 0;
+            height: 100%;
+            box-shadow: 0 10px 28px rgba(47,111,178,0.08);
         }
 
         .gallery-header {
@@ -1379,108 +1422,502 @@ class HTMLGenerator:
             color: var(--text-muted);
         }
 
-        .gallery-grid {
-            flex: 1;
-            overflow-y: auto;
-            padding: 16px;
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            grid-auto-rows: min-content;
-            gap: 16px;
-            min-height: 0;
-        }
-
-        .gallery-item {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .gallery-item:hover {
-            border-color: var(--accent);
-            box-shadow: 0 4px 12px var(--accent-glow);
-            transform: translateY(-3px);
-        }
-
-        .mechanism-gallery-item:hover {
-            border-color: #22d3ee;
-            box-shadow: 0 4px 12px rgba(34, 211, 238, 0.22);
-        }
-
-        .misconception-gallery-item:hover {
-            border-color: #f59e0b;
-            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.22);
-        }
-
-        .gallery-thumb {
-            aspect-ratio: 16 / 9;
-            width: 100%;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: var(--bg-primary);
-        }
-
-        .svg-thumb svg {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        .text-thumb {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 4px;
-            padding: 12px;
-        }
-
-        .mechanism-thumb { background: linear-gradient(135deg, rgba(34,211,238,0.18), rgba(14,116,144,0.16)); }
-        .misconception-thumb { background: linear-gradient(135deg, rgba(245,158,11,0.18), rgba(146,64,14,0.16)); }
-
-        .text-thumb-icon { font-size: 24px; }
-
-        .text-thumb-title {
-            font-size: 11px;
-            color: var(--text-secondary);
-            text-align: center;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            max-width: 100%;
-        }
-
-        .placeholder-thumb {
-            font-size: 14px;
-            color: var(--text-muted);
-        }
-
-        .gallery-info {
-            padding: 8px 12px;
+        .gallery-toolbar {
+            padding: 8px 14px 0;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            border-top: 1px solid var(--border);
-            background: var(--bg-card);
+            gap: 10px;
+            flex-shrink: 0;
         }
 
-        .gallery-time {
+        .gallery-view-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: #edf4fb;
+            border: 1px solid var(--border);
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .gallery-filter-wrap {
+            position: relative;
+        }
+
+        .gallery-filter-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: #ffffff;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+            box-shadow: 0 6px 18px rgba(47,111,178,0.08);
+        }
+
+        .gallery-filter-menu {
+            position: fixed;
+            min-width: 150px;
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: 0 16px 28px rgba(47,111,178,0.14);
+            padding: 8px;
+            display: none;
+            z-index: 60;
+        }
+
+        .gallery-filter-menu.show {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .gallery-filter-menu button {
+            width: 100%;
+            text-align: left;
+            border: none;
+            background: transparent;
+            border-radius: 10px;
+            padding: 9px 10px;
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .gallery-filter-menu button:hover {
+            background: #edf4fb;
+            color: var(--accent);
+        }
+
+        .gallery-viewport {
+            flex: 1;
+            height: 100%;
+            overflow-y: auto;
+            padding: 6px 10px 10px;
+            min-height: 0;
+            position: relative;
+        }
+
+        .gallery-viewport.detail-view {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            padding-top: 4px;
+        }
+
+        .gallery-viewport.detail-view > * {
+            width: 100%;
+            height: 100%;
+            min-height: 0;
+            flex: 1 1 auto;
+        }
+
+        .gallery-source {
+            display: none;
+        }
+
+        .gallery-home {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        .gallery-category-card {
+            border-radius: 28px;
+            border: 1px solid var(--border);
+            background: linear-gradient(180deg, #4a79ba 0%, #5d91cb 100%);
+            color: #ffffff;
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 12px 10px;
+            box-shadow: 0 16px 36px rgba(47,111,178,0.16);
+        }
+
+        .gallery-category-card.text-card {
+            background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+            color: var(--accent);
+        }
+
+        .gallery-category-card.image-card {
+            background: linear-gradient(180deg, #ffffff 0%, #eef5fd 100%);
+            color: var(--accent);
+        }
+
+        .gallery-category-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.92);
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 700;
+            box-shadow: inset 0 0 0 1px rgba(47,111,178,0.08);
+        }
+
+        .gallery-category-card.text-card .gallery-category-icon,
+        .gallery-category-card.image-card .gallery-category-icon {
+            background: linear-gradient(180deg, #88a8df 0%, #6d98d1 100%);
+            color: #ffffff;
+        }
+
+        .gallery-category-copy {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            text-align: center;
+        }
+
+        .gallery-category-title {
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .gallery-category-desc {
             font-size: 11px;
-            color: var(--accent-light);
-            font-weight: 500;
-            font-variant-numeric: tabular-nums;
+            line-height: 1.45;
+            color: rgba(255,255,255,0.80);
         }
 
-        .gallery-label {
-            font-size: 10px;
+        .gallery-category-card.text-card .gallery-category-desc,
+        .gallery-category-card.image-card .gallery-category-desc {
             color: var(--text-muted);
+        }
+
+        .gallery-enter-btn,
+        .gallery-back-btn,
+        .gallery-nav-btn {
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(255,255,255,0.94);
+            color: var(--accent);
+            font-size: 22px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 10px 24px rgba(47,111,178,0.14);
+        }
+
+        .gallery-detail-layout {
+            min-height: 100%;
+            height: 100%;
+            display: grid;
+            grid-template-columns: 156px minmax(0, 1fr);
+            gap: 10px;
+            align-items: stretch;
+            overflow: hidden;
+        }
+
+        .gallery-detail-layout > * {
+            min-height: 0;
+        }
+
+        .gallery-side {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            position: sticky;
+            top: 0;
+            align-self: start;
+            z-index: 4;
+            height: max-content;
+            min-height: 0;
+        }
+
+        .gallery-action-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: flex-start;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+        }
+
+        .gallery-mini-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: #edf4fb;
+            border: 1px solid var(--border);
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .gallery-mini-filter {
+            min-width: 74px;
+            justify-content: center;
+        }
+
+        .gallery-side-card {
+            border-radius: 20px;
+            background: linear-gradient(180deg, #eaf3fd 0%, #d9e9fb 100%);
+            padding: 10px 10px 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 8px;
+            min-height: 156px;
+            box-shadow: 0 12px 28px rgba(31, 64, 114, 0.10);
+        }
+
+        .gallery-side-card.text-side {
+            background: linear-gradient(180deg, #edf5fd 0%, #dceafb 100%);
+        }
+
+        .gallery-side-card .gallery-category-icon {
+            width: 54px;
+            height: 54px;
+        }
+
+        .gallery-side-card .gallery-category-copy {
+            flex: 0 0 auto;
+            justify-content: flex-start;
+            gap: 2px;
+        }
+
+        .gallery-side-card .gallery-category-title {
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+
+        .gallery-side-card .gallery-category-desc {
+            color: var(--text-primary);
+            opacity: 0.72;
+            font-size: 10px;
+            line-height: 1.4;
+        }
+
+        .gallery-detail-list {
+            display: block;
+            overflow-y: auto;
+            min-height: 0;
+            height: 100%;
+            max-height: 100%;
+            padding-top: 0;
+            padding-right: 6px;
+            overscroll-behavior: contain;
+        }
+
+        .gallery-detail-item {
+            border-radius: 999px;
+            background: #edf5fd;
+            border: 1px solid #d7e6f5;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            cursor: pointer;
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+            margin-bottom: 10px;
+        }
+
+        .gallery-detail-item.text-item {
+            background: #edf5fd;
+            border-color: #d7e6f5;
+        }
+
+        .gallery-detail-item:hover {
+            transform: translateX(4px);
+            box-shadow: 0 10px 24px rgba(47,111,178,0.10);
+        }
+
+        .gallery-detail-item.active {
+            border-color: var(--accent);
+            background: #dceafb;
+            box-shadow: 0 0 0 1px rgba(47,111,178,0.12) inset;
+        }
+
+        .gallery-detail-time {
+            min-width: 54px;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .gallery-detail-text {
+            font-size: 13px;
+            line-height: 1.55;
+            color: var(--text-primary);
+        }
+
+        .gallery-image-detail {
+            min-height: 100%;
+            height: 100%;
+            display: grid;
+            grid-template-columns: 72px minmax(0, 1fr);
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        .gallery-image-main {
+            min-height: 100%;
+            height: 100%;
+            display: grid;
+            grid-template-columns: minmax(0, 1.45fr) minmax(220px, 0.95fr);
+            gap: 10px;
+            align-items: stretch;
+            align-content: stretch;
+            overflow: hidden;
+        }
+
+        .gallery-image-stage {
+            position: relative;
+            background: #edf5fd;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            min-height: 0;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            padding: 10px 36px;
+        }
+
+        .gallery-back-btn {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+        }
+
+        .gallery-image-stage img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 14px;
+            box-shadow: 0 12px 28px rgba(47,111,178,0.14);
+        }
+
+        .gallery-image-caption {
+            border-radius: 18px;
+            background: #ffffff;
+            border: 1px solid var(--border);
+            padding: 14px 16px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.65;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            height: 100%;
+        }
+
+        .gallery-nav-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .gallery-nav-btn.prev-btn { left: 16px; }
+        .gallery-nav-btn.next-btn { right: 16px; }
+
+        .gallery-mode-timeline {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            grid-auto-rows: min-content;
+            gap: 12px;
+            min-height: 0;
+        }
+
+        .timeline-card {
+            background: linear-gradient(180deg, #ffffff 0%, #f4f9fe 100%);
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            overflow: hidden;
+            display: grid;
+            grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 186px;
+        }
+
+        .timeline-card:hover {
+            border-color: var(--border-light);
+            box-shadow: 0 10px 24px rgba(47, 111, 178, 0.16);
+            transform: translateY(-3px);
+        }
+
+        .timeline-top {
+            position: relative;
+            min-height: 0;
+            background: #ecf4fd;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px 12px 8px;
+        }
+
+        .timeline-time {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.94);
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(47,111,178,0.10);
+        }
+
+        .timeline-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: #ffffff;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .timeline-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .timeline-bottom {
+            background: #ffffff;
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-start;
+            padding: 12px 14px;
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.45;
+            text-align: left;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
         }
 
         .gallery-empty {
@@ -1495,140 +1932,26 @@ class HTMLGenerator:
             opacity: 0.6;
         }
 
-        .focus-panel {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            overflow: hidden;
-            min-height: 0;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .focus-panel-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 12px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .focus-panel-header h3 {
-            font-size: 13px;
-            font-weight: 600;
-        }
-
-        .focus-panel-count {
-            font-size: 11px;
-            color: var(--text-muted);
-        }
-
-        .focus-panel-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            padding: 10px 12px;
-            flex: 1;
-            overflow-y: auto;
-            min-height: 0;
-        }
-
-        .focus-panel-empty {
-            padding: 0 12px 12px;
-            color: var(--text-muted);
-            font-size: 12px;
-        }
-
-        .focus-item {
-            background: rgba(255,255,255,0.02);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 10px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .focus-item:hover {
-            transform: translateY(-2px);
-        }
-
-        .mechanism-focus-item:hover {
-            border-color: #22d3ee;
-            box-shadow: 0 4px 12px rgba(34, 211, 238, 0.16);
-        }
-
-        .misconception-focus-item:hover {
-            border-color: #f59e0b;
-            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.16);
-        }
-
-        .focus-item-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 6px;
-            gap: 8px;
-        }
-
-        .focus-item-time {
-            font-size: 11px;
-            color: var(--accent-light);
-            font-variant-numeric: tabular-nums;
-        }
-
-        .focus-item-badge {
-            font-size: 10px;
-            color: var(--text-secondary);
-        }
-
-        .focus-item-title {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-primary);
-            line-height: 1.45;
-            margin-bottom: 4px;
-            white-space: normal;
-            overflow-wrap: break-word;
-            word-break: normal;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-
-        .focus-item-sub {
-            font-size: 11px;
-            color: var(--text-secondary);
-            line-height: 1.45;
-            white-space: normal;
-            overflow-wrap: break-word;
-            word-break: normal;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-
         .concept-graph-section {
-            border-top: 1px solid var(--border);
-            background: linear-gradient(180deg, rgba(26,27,37,0.98), rgba(18,19,29,0.98));
-            padding: 14px 16px 18px;
+            background: linear-gradient(180deg, #ffffff 0%, #f4f9fe 100%);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 14px 14px 16px;
             display: flex;
             flex-direction: column;
             gap: 10px;
             overflow: hidden;
             min-height: 0;
+            box-shadow: 0 10px 28px rgba(74,121,186,0.08);
         }
 
-        .concept-graph-header,
-        .concept-graph-title {
+        .concept-graph-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
 
-        .concept-graph-header h3,
-        .concept-graph-title {
+        .concept-graph-header h3 {
             font-size: 14px;
             font-weight: 600;
         }
@@ -1638,96 +1961,90 @@ class HTMLGenerator:
             color: var(--text-muted);
         }
 
+        .concept-main-topic {
+            background: linear-gradient(180deg, #eef5fd 0%, #dfeefe 100%);
+            border: 1px solid rgba(151, 184, 219, 0.4);
+            border-radius: 14px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .concept-main-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+
+        .concept-graph-title {
+            font-size: 15px;
+            font-weight: 700;
+            line-height: 1.35;
+            color: var(--text-primary);
+        }
+
         .concept-graph-summary {
             font-size: 12px;
             line-height: 1.55;
             color: var(--text-secondary);
         }
 
-        .concept-graph-nodes {
+        .concept-node-list {
             display: flex;
-            flex-wrap: wrap;
+            flex-direction: column;
             gap: 8px;
             overflow-y: auto;
+            min-height: 0;
         }
 
         .concept-node {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 10px;
-            border-radius: 999px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.06);
-            color: var(--text-secondary);
-            transition: all 0.2s ease;
-            opacity: 0.28;
-            transform: scale(0.96);
-        }
-
-        .concept-node.revealed {
-            opacity: 0.75;
-            transform: scale(1);
-        }
-
-        .concept-node.active {
-            color: #ffffff;
-            border-color: var(--accent);
-            background: rgba(99,102,241,0.18);
-            box-shadow: 0 0 0 1px rgba(99,102,241,0.15) inset;
-        }
-
-        .concept-node-label { font-size: 12px; }
-        .concept-node-weight {
-            font-size: 10px;
-            color: var(--accent-light);
-            font-weight: 700;
-        }
-
-        .concept-graph-edges {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 4px;
-            font-size: 11px;
-            color: var(--text-muted);
-            overflow-y: auto;
-        }
-
-        .concept-edge {
-            font-size: 12px;
-            color: var(--text-secondary);
-            padding: 8px 10px;
-            border-radius: 10px;
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.05);
             display: flex;
-            flex-direction: column;
-            gap: 4px;
-            opacity: 0.22;
-            transform: translateX(-4px);
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: #f6fbff;
+            border: 1px solid #d6e4f2;
+            color: var(--text-secondary);
             transition: all 0.2s ease;
-        }
-
-        .concept-edge.revealed {
-            opacity: 0.68;
+            opacity: 0.46;
             transform: translateX(0);
         }
 
-        .concept-edge.active {
-            border-color: var(--accent-light);
-            background: rgba(99,102,241,0.12);
-            color: var(--text-primary);
+        .concept-node.revealed {
+            opacity: 0.82;
         }
 
-        .concept-edge-label {
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.6px;
-            color: var(--accent-light);
+        .concept-node.active {
+            color: var(--accent);
+            border-color: var(--accent);
+            background: rgba(47,111,178,0.12);
+            box-shadow: 0 0 0 1px rgba(47,111,178,0.10) inset, 0 8px 22px rgba(47,111,178,0.14);
         }
 
-        .concept-edge-route {
+        .concept-node-label {
             font-size: 12px;
+            font-weight: 600;
+            line-height: 1.4;
+        }
+        .concept-node-weight {
+            font-size: 10px;
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .concept-empty {
+            padding: 16px 12px;
+            border-radius: 12px;
+            background: #f6fbff;
+            border: 1px dashed var(--border-light);
+            color: var(--text-muted);
+            font-size: 12px;
+            text-align: center;
         }
 
         @keyframes mechanismReveal {
@@ -1757,7 +2074,7 @@ class HTMLGenerator:
             align-items: center;
             justify-content: space-between;
             border-bottom: 1px solid var(--border);
-            background: var(--bg-secondary);
+            background: var(--bg-card);
             flex-shrink: 0;
         }
 
@@ -1768,6 +2085,7 @@ class HTMLGenerator:
             flex: 1;
             overflow-y: auto;
             padding: 8px 0;
+            background: var(--bg-card);
         }
 
         .subtitle-item {
@@ -1965,16 +2283,27 @@ class HTMLGenerator:
         const overlayContainer = document.getElementById('overlayContainer');
         const subtitleList = document.getElementById('subtitleList');
         const searchInput = document.getElementById('searchInput');
-        const galleryGrid = document.getElementById('galleryGrid');
+        const galleryViewport = document.getElementById('galleryViewport');
+        const gallerySource = document.getElementById('gallerySource');
         const galleryEmpty = document.getElementById('galleryEmpty');
         const galleryCount = document.getElementById('galleryCount');
-        const mechanismList = document.getElementById('mechanismList');
-        const misconceptionList = document.getElementById('misconceptionList');
+        const galleryViewChip = document.getElementById('galleryViewChip');
+        const galleryFilterMenu = document.getElementById('galleryFilterMenu');
+        const galleryToolbar = document.querySelector('.gallery-toolbar');
+        const mainContent = document.getElementById('mainContent');
+        const subtitleToggleIcon = document.getElementById('subtitleToggleIcon');
 
         // ========== State ==========
         let overlaysEnabled = true;
         let isUserScrollingSubs = false;
         let scrollTimeout = null;
+        let galleryMode = 'category';
+        let galleryDetailType = null;
+        let timelineSort = 'time';
+        let imageCarouselIndex = 0;
+        let galleryEntries = [];
+        let galleryReturnState = null;
+        let selectedDetailIdx = null;
 
         // ========== Video Time Update ==========
         video.addEventListener('timeupdate', function() {{
@@ -2011,12 +2340,12 @@ class HTMLGenerator:
                 }}
             }});
 
-            // Update timeline progress
+            // Update time display if present
             if (video.duration) {{
-                const pct = (currentTime / video.duration) * 100;
-                document.getElementById('timelineProgress').style.width = pct + '%';
-                document.getElementById('videoTimeDisplay').textContent =
-                    formatTime(currentTime) + ' / ' + formatTime(video.duration);
+                const timeDisplay = document.getElementById('videoTimeDisplay');
+                if (timeDisplay) {{
+                    timeDisplay.textContent = formatTime(currentTime) + ' / ' + formatTime(video.duration);
+                }}
             }}
         }});
 
@@ -2028,36 +2357,19 @@ class HTMLGenerator:
         }});
 
         // ========== Overlay Container 自适应 ==========
-        // 当视频使用 object-fit: contain 时，实际视频区域可能
-        // 小于容器（有黑边/letterbox），需要让 overlay 精确覆盖视频区域
+        // 当视频使用 object-fit: cover 时，让 overlay 覆盖整个视频框
+        // 这样视频和浮层都会占满容器，避免左右留白
         function adjustOverlayToVideo() {{
             const wrapper = video.parentElement;
-            if (!wrapper || !video.videoWidth || !video.videoHeight) return;
+            if (!wrapper) return;
 
             const wW = wrapper.clientWidth;
             const wH = wrapper.clientHeight;
-            const vRatio = video.videoWidth / video.videoHeight;
-            const cRatio = wW / wH;
 
-            let renderW, renderH, offsetX, offsetY;
-            if (cRatio > vRatio) {{
-                // 容器更宽 → 左右黑边
-                renderH = wH;
-                renderW = wH * vRatio;
-                offsetX = (wW - renderW) / 2;
-                offsetY = 0;
-            }} else {{
-                // 容器更高 → 上下黑边
-                renderW = wW;
-                renderH = wW / vRatio;
-                offsetX = 0;
-                offsetY = (wH - renderH) / 2;
-            }}
-
-            overlayContainer.style.left = offsetX + 'px';
-            overlayContainer.style.top = offsetY + 'px';
-            overlayContainer.style.width = renderW + 'px';
-            overlayContainer.style.height = renderH + 'px';
+            overlayContainer.style.left = '0px';
+            overlayContainer.style.top = '0px';
+            overlayContainer.style.width = wW + 'px';
+            overlayContainer.style.height = wH + 'px';
         }}
 
         video.addEventListener('loadedmetadata', adjustOverlayToVideo);
@@ -2066,46 +2378,9 @@ class HTMLGenerator:
         setTimeout(adjustOverlayToVideo, 500);
         setTimeout(adjustOverlayToVideo, 2000);
 
-        // ========== Timeline Markers ==========
+        // ========== Gallery Init ==========
         video.addEventListener('loadedmetadata', function() {{
-            refreshTimelineMarkers();
-        }});
-
-        function refreshTimelineMarkers() {{
-            const duration = video.duration;
-            if (!duration) return;
-
-            const bar = document.getElementById('timelineBar');
-            // Remove old dots
-            bar.querySelectorAll('.timeline-dot').forEach(d => d.remove());
-
-            document.querySelectorAll('.enhancement-container').forEach(el => {{
-                const start = parseFloat(el.dataset.start);
-                const type = el.dataset.type || '';
-                const pct = (start / duration) * 100;
-
-                const dot = document.createElement('div');
-                let dotClass = 'text-dot';
-                if (type.includes('svg')) dotClass = 'svg-dot';
-                else if (type.includes('mechanism')) dotClass = 'mechanism-dot';
-                else if (type.includes('misconception')) dotClass = 'misconception-dot';
-                dot.className = 'timeline-dot ' + dotClass;
-                dot.style.left = pct + '%';
-                dot.title = formatTime(start);
-                dot.onclick = function(e) {{ e.stopPropagation(); jumpTo(start); }};
-                bar.appendChild(dot);
-            }});
-
-            // Update gallery count
             updateGalleryCount();
-        }}
-
-        // Timeline bar click to seek
-        document.getElementById('timelineBar').addEventListener('click', function(e) {{
-            if (!video.duration) return;
-            const rect = this.getBoundingClientRect();
-            const pct = (e.clientX - rect.left) / rect.width;
-            video.currentTime = pct * video.duration;
         }});
 
         // ========== Jump to time ==========
@@ -2131,6 +2406,262 @@ class HTMLGenerator:
 
         // Init toggle button state
         document.getElementById('toggleOverlays').classList.add('active');
+
+        function toggleTranscriptPanel() {{
+            mainContent.classList.toggle('transcript-collapsed');
+            const collapsed = mainContent.classList.contains('transcript-collapsed');
+            subtitleToggleIcon.textContent = collapsed ? '←' : '→';
+        }}
+
+        function toggleGalleryMenu(event) {{
+            if (event) {{
+                const rect = event.currentTarget.getBoundingClientRect();
+                galleryFilterMenu.style.top = (rect.bottom + 8) + 'px';
+                galleryFilterMenu.style.left = Math.max(12, rect.left) + 'px';
+            }}
+            galleryFilterMenu.classList.toggle('show');
+        }}
+
+        function closeGalleryMenu() {{
+            galleryFilterMenu.classList.remove('show');
+        }}
+
+        function collectGalleryEntries() {{
+            galleryEntries = Array.from(gallerySource.querySelectorAll('.gallery-source-item')).map(node => ({{
+                idx: Number(node.dataset.idx || 0),
+                start: Number(node.dataset.start || 0),
+                category: node.dataset.category || 'text',
+                displayType: node.dataset.displayType || '文字',
+                title: node.dataset.title || '',
+                summary: node.dataset.summary || '',
+                icon: node.dataset.icon || '文',
+                svgPath: node.dataset.svgPath || '',
+                svgMode: node.dataset.svgMode || 'static_svg',
+                topic: node.dataset.topic || ''
+            }}));
+        }}
+
+        function getCategoryMeta(type) {{
+            if (type === 'mechanism') {{
+                return {{ title: '机制链', desc: '用于展示过程、链路与机制关系', icon: '⚙', cardClass: 'mechanism-card', sideClass: 'mechanism-side' }};
+            }}
+            if (type === 'image') {{
+                return {{ title: '图片', desc: '用于浏览 SVG / 图像增强内容', icon: '图', cardClass: 'image-card', sideClass: 'image-side' }};
+            }}
+            return {{ title: '文字', desc: '用于浏览文字说明与文本增强', icon: '文', cardClass: 'text-card', sideClass: 'text-side' }};
+        }}
+
+        function getEntriesByType(type) {{
+            return galleryEntries
+                .filter(item => item.category === type)
+                .sort((a, b) => a.start - b.start);
+        }}
+
+        function renderGallery() {{
+            if (!galleryEntries.length) {{
+                galleryViewport.innerHTML = '';
+                galleryEmpty.style.display = '';
+                galleryViewport.classList.remove('detail-view');
+                return;
+            }}
+            galleryEmpty.style.display = 'none';
+            galleryToolbar.style.display = galleryDetailType ? 'none' : 'flex';
+            galleryViewport.classList.toggle('detail-view', !!galleryDetailType);
+            if (galleryMode === 'timeline') {{
+                galleryViewChip.textContent = timelineSort === 'time' ? '时间排序' : '按分类排序';
+                renderTimelineGallery();
+                return;
+            }}
+            galleryViewChip.textContent = galleryDetailType ? '详情模式' : '分类模式';
+            if (!galleryDetailType) {{
+                renderCategoryHome();
+                return;
+            }}
+            if (galleryDetailType === 'image') {{
+                renderImageDetail();
+                return;
+            }}
+            renderTextualDetail(galleryDetailType);
+        }}
+
+        function renderCategoryHome() {{
+            const types = ['mechanism', 'text', 'image'];
+            let cards = '';
+            types.forEach(type => {{
+                const meta = getCategoryMeta(type);
+                cards += '<div class="gallery-category-card ' + meta.cardClass + '">';
+                cards += '<div class="gallery-category-icon">' + escapeHtml(meta.icon) + '</div>';
+                cards += '<div class="gallery-category-copy">';
+                cards += '<div class="gallery-category-title">' + escapeHtml(meta.title) + '</div>';
+                cards += '<div class="gallery-category-desc">' + escapeHtml(meta.desc) + '</div>';
+                cards += '</div>';
+                cards += '<button class="gallery-enter-btn" onclick="openGalleryDetail(\\'' + type + '\\')">→</button>';
+                cards += '</div>';
+            }});
+            galleryViewport.innerHTML = '<div class="gallery-home">' + cards + '</div>';
+        }}
+
+        function openGalleryDetail(type) {{
+            galleryMode = 'category';
+            galleryDetailType = type;
+            imageCarouselIndex = 0;
+            selectedDetailIdx = null;
+            galleryReturnState = {{ mode: 'category', timelineSort: timelineSort }};
+            closeGalleryMenu();
+            renderGallery();
+        }}
+
+        function backToGalleryHome() {{
+            if (galleryReturnState && galleryReturnState.mode === 'timeline') {{
+                galleryMode = 'timeline';
+                timelineSort = galleryReturnState.timelineSort || timelineSort;
+            }} else {{
+                galleryMode = 'category';
+            }}
+            galleryDetailType = null;
+            selectedDetailIdx = null;
+            closeGalleryMenu();
+            renderGallery();
+        }}
+
+        function focusDetailItem(type, idx) {{
+            const entry = galleryEntries.find(item => item.idx === idx);
+            if (!entry) return;
+            galleryDetailType = type;
+            selectedDetailIdx = idx;
+            if (type === 'image') {{
+                const entries = getEntriesByType('image');
+                imageCarouselIndex = Math.max(0, entries.findIndex(item => item.idx === idx));
+            }}
+            jumpTo(entry.start);
+            renderGallery();
+        }}
+
+        function renderTextualDetail(type) {{
+            const entries = getEntriesByType(type);
+            const meta = getCategoryMeta(type);
+            let itemsHtml = '';
+            entries.forEach(item => {{
+                let cls = type === 'text' ? 'gallery-detail-item text-item' : 'gallery-detail-item';
+                if (item.idx === selectedDetailIdx) cls += ' active';
+                itemsHtml += '<div class="' + cls + '" onclick="focusDetailItem(\\'' + type + '\\',' + item.idx + ')">';
+                itemsHtml += '<div class="gallery-detail-time">' + formatTime(item.start) + '</div>';
+                itemsHtml += '<div class="gallery-detail-text">' + escapeHtml(item.title || item.summary || item.topic) + '</div>';
+                itemsHtml += '</div>';
+            }});
+            const firstStart = entries[0] ? entries[0].start : 0;
+            let html = '';
+            html += '<div class="gallery-detail-layout">';
+            html += '<div class="gallery-side">';
+            html += '<div class="gallery-action-stack">';
+            html += '<button class="gallery-back-btn" onclick="backToGalleryHome()">←</button>';
+            html += '</div>';
+            html += '<div class="gallery-side-card ' + meta.sideClass + '">';
+            html += '<div class="gallery-category-icon">' + escapeHtml(meta.icon) + '</div>';
+            html += '<div class="gallery-category-copy">';
+            html += '<div class="gallery-category-title">' + escapeHtml(meta.title) + '</div>';
+            html += '<div class="gallery-category-desc">' + escapeHtml(meta.desc) + '</div>';
+            html += '</div>';
+            html += '</div></div>';
+            html += '<div class="gallery-detail-list">' + itemsHtml + '</div>';
+            html += '</div>';
+            galleryViewport.innerHTML = html;
+            const activeItem = galleryViewport.querySelector('.gallery-detail-item.active');
+            if (activeItem) {{
+                setTimeout(() => activeItem.scrollIntoView({{ block: 'center', behavior: 'smooth' }}), 0);
+            }}
+        }}
+
+        function renderImageDetail() {{
+            const entries = getEntriesByType('image');
+            if (!entries.length) {{
+                backToGalleryHome();
+                return;
+            }}
+            imageCarouselIndex = Math.max(0, Math.min(imageCarouselIndex, entries.length - 1));
+            const current = entries[imageCarouselIndex];
+            const imageHtml = current.svgPath
+                ? '<img src="' + escapeAttr(current.svgPath) + '" onclick="jumpTo(' + current.start + ')">'
+                : '<div class="concept-empty">暂无图片</div>';
+            let html = '';
+            html += '<div class="gallery-image-detail">';
+            html += '<div class="gallery-side">';
+            html += '<div class="gallery-action-stack">';
+            html += '<button class="gallery-back-btn" onclick="backToGalleryHome()">←</button>';
+            html += '</div>';
+            html += '</div>';
+            html += '<div class="gallery-image-main">';
+            html += '<div class="gallery-image-stage">';
+            html += '<button class="gallery-nav-btn prev-btn" onclick="stepImageCarousel(-1)">←</button>';
+            html += imageHtml;
+            html += '<button class="gallery-nav-btn next-btn" onclick="stepImageCarousel(1)">→</button>';
+            html += '</div>';
+            html += '<div class="gallery-image-caption"><strong>' + escapeHtml(current.title || '图片') + '</strong><br>' + escapeHtml(current.summary || current.topic || '点击图片可跳转到对应时间点。') + '</div>';
+            html += '</div></div>';
+            galleryViewport.innerHTML = html;
+        }}
+
+        function stepImageCarousel(offset) {{
+            const entries = getEntriesByType('image');
+            if (!entries.length) return;
+            imageCarouselIndex = (imageCarouselIndex + offset + entries.length) % entries.length;
+            renderImageDetail();
+        }}
+
+        function renderTimelineGallery() {{
+            let items = [...galleryEntries];
+            if (timelineSort === 'category') {{
+                const order = {{ mechanism: 0, text: 1, image: 2 }};
+                items.sort((a, b) => (order[a.category] - order[b.category]) || (a.start - b.start));
+            }} else {{
+                items.sort((a, b) => a.start - b.start);
+            }}
+            let cards = '';
+            items.forEach(item => {{
+                cards += '<div class="timeline-card" onclick="openTimelineItem(\\'' + item.category + '\\',' + item.idx + ')">';
+                cards += '<div class="timeline-top">';
+                cards += '<div class="timeline-time">' + formatTime(item.start) + '</div>';
+                cards += '<div class="timeline-icon">' + escapeHtml(item.icon) + '</div>';
+                cards += '<div class="timeline-title">' + escapeHtml(item.displayType) + '</div>';
+                cards += '</div>';
+                cards += '<div class="timeline-bottom">' + escapeHtml(item.summary || item.title || item.topic) + '</div>';
+                cards += '</div>';
+            }});
+            galleryViewport.innerHTML = '<div class="gallery-mode-timeline">' + cards + '</div>';
+        }}
+
+        function openTimelineItem(type, idx) {{
+            galleryReturnState = {{ mode: 'timeline', timelineSort: timelineSort }};
+            galleryMode = 'category';
+            galleryDetailType = type;
+            selectedDetailIdx = idx;
+            const entry = galleryEntries.find(item => item.idx === idx);
+            if (entry) jumpTo(entry.start);
+            if (type === 'image') {{
+                const entries = getEntriesByType('image');
+                imageCarouselIndex = Math.max(0, entries.findIndex(item => item.idx === idx));
+            }}
+            closeGalleryMenu();
+            renderGallery();
+        }}
+
+        function setGalleryMode(mode) {{
+            galleryMode = mode;
+            if (mode === 'timeline') {{
+                galleryDetailType = null;
+                selectedDetailIdx = null;
+            }}
+            closeGalleryMenu();
+            renderGallery();
+        }}
+
+        function setTimelineSort(mode) {{
+            timelineSort = mode;
+            galleryMode = 'timeline';
+            galleryDetailType = null;
+            closeGalleryMenu();
+            renderGallery();
+        }}
 
         // ========== Search Subtitles ==========
         function searchSubtitles() {{
@@ -2175,6 +2706,19 @@ class HTMLGenerator:
 
         function escapeRegex(str) {{
             return str.replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\\\$&');
+        }}
+
+        function escapeHtml(str) {{
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }}
+
+        function escapeAttr(str) {{
+            return escapeHtml(str);
         }}
 
         // Enter key triggers search
@@ -2228,22 +2772,10 @@ class HTMLGenerator:
 
         // ========== Gallery Management ==========
         function updateGalleryCount() {{
-            const items = galleryGrid.querySelectorAll('.gallery-item');
-            const count = items.length;
+            collectGalleryEntries();
+            const count = galleryEntries.length;
             galleryCount.textContent = count + ' 个增强点';
-            galleryEmpty.style.display = count > 0 ? 'none' : '';
-
-            const mechanismItems = mechanismList ? mechanismList.querySelectorAll('.focus-item').length : 0;
-            const misconceptionItems = misconceptionList ? misconceptionList.querySelectorAll('.focus-item').length : 0;
-            const mechanismCount = document.getElementById('mechanismCount');
-            const misconceptionCount = document.getElementById('misconceptionCount');
-            const mechanismEmpty = document.getElementById('mechanismEmpty');
-            const misconceptionEmpty = document.getElementById('misconceptionEmpty');
-
-            if (mechanismCount) mechanismCount.textContent = mechanismItems + ' 条';
-            if (misconceptionCount) misconceptionCount.textContent = misconceptionItems + ' 条';
-            if (mechanismEmpty) mechanismEmpty.style.display = mechanismItems > 0 ? 'none' : '';
-            if (misconceptionEmpty) misconceptionEmpty.style.display = misconceptionItems > 0 ? 'none' : '';
+            renderGallery();
         }}
 
         function syncConceptGraph(currentTime) {{
@@ -2260,14 +2792,6 @@ class HTMLGenerator:
                 node.classList.toggle('revealed', revealedIds.has(node.dataset.nodeId));
                 node.classList.toggle('active', activeIds.includes(node.dataset.nodeId));
             }});
-            document.querySelectorAll('.concept-edge').forEach(edge => {{
-                const source = edge.dataset.source;
-                const target = edge.dataset.target;
-                const revealed = revealedIds.has(source) && revealedIds.has(target);
-                const active = activeIds.includes(source) && activeIds.includes(target);
-                edge.classList.toggle('revealed', revealed);
-                edge.classList.toggle('active', active);
-            }});
         }}
 
         // ========== Utility ==========
@@ -2279,6 +2803,11 @@ class HTMLGenerator:
 
         // ========== Init ==========
         updateGalleryCount();
+        document.addEventListener('click', function(e) {{
+            if (!e.target.closest('.gallery-filter-wrap')) {{
+                closeGalleryMenu();
+            }}
+        }});
         console.log('Video Enhancement Studio loaded');
         console.log('Transcript entries:', transcriptData.length);
         console.log('Concept graph nodes:', (conceptGraphData.nodes || []).length);

@@ -1,15 +1,8 @@
 """
-Visual Strategy (Simple Mode) — Context Distillation + Semantic Alignment + Visual Type Classification
-==========================================================================================
+Visual Strategy (Simple Mode)
+=============================
 
-Core responsibility: Take raw video context (scene_context, layout_context, region_context)
-and subtitle text, produce a structured design_brief that ensures:
-1. SVG content matches the video scene semantically
-2. Colors/style blend with the video frame
-3. Layout and animation are appropriate for the content
-4. visual_type is correctly identified for type-specific SVG generation
-
-Uses 1 LLM call to do all of the above.
+Generate a compact, LLM-friendly design brief for direct SVG code generation.
 """
 
 import os
@@ -21,12 +14,11 @@ import json
 sys.path.insert(0, os.path.dirname(__file__))
 from custom_chat_model import CustomChatModel
 
-# Valid SVG visual types
 VISUAL_TYPES = ["data_chart", "flowchart", "concept_map", "comparison", "hierarchy", "timeline", "creative"]
 
 
 class VisualStrategy:
-    """Context distillation + semantic alignment + visual type routing."""
+    """Build a lightweight visual brief instead of a template-oriented motion spec."""
 
     def __init__(self, llm_type: str = "claude-sonnet-4-5-20250929"):
         self.llm_type = llm_type
@@ -41,6 +33,7 @@ class VisualStrategy:
         text_input: str,
         layout_context: Optional[Dict] = None,
         scene_context: Optional[Dict] = None,
+        motion_context: Optional[Dict] = None,
         visual_description: str = "",
     ) -> Dict[str, Any]:
         """
@@ -53,10 +46,11 @@ class VisualStrategy:
             visual_description: Visual hint from decision_agent
 
         Returns:
-            Structured design_brief dict with visual_type
+            Lightweight design_brief dict for direct LLM SVG generation
         """
         layout_context = layout_context or {}
         scene_context = scene_context or {}
+        motion_context = motion_context or {}
 
         # print("==========================================")
         # print("layout_context:")
@@ -139,6 +133,7 @@ class VisualStrategy:
             svg_prompt=svg_prompt,
             scene_description=scene_description,
             position=position,
+            motion_context=motion_context,
             visual_description=visual_description,
         )
 
@@ -149,10 +144,10 @@ class VisualStrategy:
             print(f"  [VisualStrategy] LLM failed: {e}, using fallback")
             brief = self._fallback_brief(text_input)
 
-        # ── 4. Validate visual_type ─────────────────────────────────
+        # ── 4. Validate / normalize ────────────────────────────────
         vtype = brief.get("visual_type", "concept_map")
         if vtype not in VISUAL_TYPES:
-            brief["visual_type"] = "concept_map"
+            brief["visual_type"] = "creative"
 
         # ── 5. Inject hard color values ────────────────────────────
         brief["color_instructions"] = {
@@ -166,6 +161,7 @@ class VisualStrategy:
         }
 
         print(f"    ✓ Visual type: {brief.get('visual_type', 'N/A')}")
+        print(f"    ✓ SVG mode: {brief.get('svg_mode', 'static')}")
         print(f"    ✓ Colors → bg={bg_color} accent={accent_color} secondary={secondary_color}")
         return brief
 
@@ -197,6 +193,16 @@ class VisualStrategy:
             lines.append(f"Style guidance: {kwargs['svg_prompt']}")
         if kwargs.get("visual_description"):
             lines.append(f"Visual hint from classifier: {kwargs['visual_description']}")
+        motion_ctx = kwargs.get("motion_context", {}) or {}
+        if motion_ctx:
+            lines.append(
+                "Animation routing hint: "
+                f"mode={motion_ctx.get('svg_mode_hint', 'none')}, "
+                f"worth={motion_ctx.get('motion_worthiness', 0.0)}, "
+                f"grammar={motion_ctx.get('motion_grammar_hint', 'none')}"
+            )
+            if motion_ctx.get("animation_reason"):
+                lines.append(f"Animation reason: {motion_ctx.get('animation_reason')}")
 
         brightness = kwargs.get("region_brightness", 50)
         if brightness < 80:
@@ -225,50 +231,28 @@ class VisualStrategy:
         self._ensure_llm()
         from langchain_core.messages import SystemMessage, HumanMessage
 
-        system_prompt = """You are a Visual Strategy Director for educational video overlays.
+        system_prompt = """You are a visual brief writer for educational SVG overlays.
 
-Your job: Take raw subtitle text + video scene context, and produce a structured design brief for an SVG illustrator.
+Write a SHORT, useful design brief for an LLM that will directly author the SVG code.
 
-═══════════════════════════════════════════════════════
- STEP 1: DETERMINE visual_type
-═══════════════════════════════════════════════════════
-Identify the best structure for the content. MUST be one of:
-[ data_chart | flowchart | concept_map | comparison | hierarchy | timeline | creative ]
+Goals:
+1. Capture the actual meaning of the subtitle, not isolated words.
+2. Suggest a strong visual composition that explains the idea clearly.
+3. Encourage animation when it helps, but keep even static-style graphics slightly animated.
+4. Avoid generic box-and-arrow filler unless the content truly needs it.
 
-Use your best judgment to select the type that makes the information clearest. If unsure, choose 'creative'.
-
-═══════════════════════════════════════════════════════
- STEP 2: EXTRACT CONTENT & ALIGN WITH SCENE
-═══════════════════════════════════════════════════════
-CRITICAL RULES:
-1. SEMANTIC ALIGNMENT: The SVG MUST illustrate the subtitle content.
-2. SCENE MATCHING: Match illustration style to video scene type.
-3. CONTENT EXTRACTION: Find the ONE key concept worth visualizing.
-
-═══════════════════════════════════════════════════════
- OUTPUT FORMAT (JSON ONLY)
-═══════════════════════════════════════════════════════
-Your response must be a valid JSON object. Do not include markdown blocks.
-
+Return JSON only with this schema:
 {
-  "visual_type": "Selected type from the list above",
-  "core_topic": "One clear sentence describing what to visualize",
-
-  "display_title": "1-5 words punchy title",
-  "display_subtitle": "1 concise sentence explaining the core point",
-  
-  "entities": [
-    {"label": "Name", "icon_hint": "What to draw, e.g. 'geometric nodes'"}
-  ],
-  "style_directive": "Art direction: line weight, shape style, aesthetic",
-  "animation_plan": "What SVG animations to use and why",
-  "scene_alignment": "How this style matches the video scene context",
-  "warnings": ["Things to avoid based on scene/context"],
-
-  "custom_data": {
-    "// NOTE": "Add any additional highly structured fields here that are relevant to the chosen visual_type.",
-    "// Examples (do not copy exactly, just generate what makes sense)": "steps for flowchart, relationships for concept map, comparison_dimensions for comparison, variables for formulas, etc."
-  }
+  "visual_type": "data_chart | flowchart | concept_map | comparison | hierarchy | timeline | creative",
+  "core_topic": "one clear sentence",
+  "display_title": "short title, ideally under 6 words",
+  "display_subtitle": "one concise explanatory sentence",
+  "key_elements": ["2-5 meaningful visual elements or concepts"],
+  "layout_concept": "how the composition should be arranged on canvas",
+  "style_directive": "art direction in one sentence",
+  "animation_intent": "high | light",
+  "animation_notes": "what should move, reveal, pulse, orbit, flow, or shimmer",
+  "scene_alignment": "how it should blend with the video scene"
 }
 """
 
@@ -279,7 +263,12 @@ SUBTITLE TEXT:
 
 {context_block}
 
-IMPORTANT: First decide the visual_type, then extract the appropriate structured data into the 'custom_data' schema.
+IMPORTANT:
+- Do not just extract random words from the subtitle.
+- key_elements must be meaningful concepts, objects, stages, or entities.
+- If the segment is suitable for strong explanatory animation, set animation_intent to "high".
+- Otherwise set animation_intent to "light" and still suggest subtle motion.
+- Prefer a clean, expressive composition over generic labeled boxes.
 Return JSON only."""
 
         messages = [
@@ -329,14 +318,52 @@ Return JSON only."""
             parsed["core_topic"] = text_input[:80]
         if not parsed.get("visual_type"):
             parsed["visual_type"] = "creative"
-        if not parsed.get("entities"):
-            parsed["entities"] = [{"label": "Concept", "icon_hint": "abstract diagram"}]
+        if not parsed.get("key_elements"):
+            parsed["key_elements"] = self._extract_key_elements(text_input)
+        if not parsed.get("layout_concept"):
+            parsed["layout_concept"] = "Use a balanced full-canvas composition with a clear visual focal point."
         if not parsed.get("style_directive"):
             parsed["style_directive"] = "Clean style"
-        if not parsed.get("animation_plan"):
-            parsed["animation_plan"] = "Sequential fadeIn"
+        if not parsed.get("animation_notes"):
+            parsed["animation_notes"] = "Add subtle reveal, pulse, or line-draw motion to keep the SVG alive."
+        if parsed.get("animation_intent") not in ("high", "light"):
+            parsed["animation_intent"] = "light"
+        if not parsed.get("scene_alignment"):
+            parsed["scene_alignment"] = "Blend with the frame colors while preserving strong readability."
+
+        key_elements = parsed.get("key_elements", [])
+        if isinstance(key_elements, list):
+            parsed["key_elements"] = [str(item).strip()[:40] for item in key_elements if str(item).strip()][:5]
+        else:
+            parsed["key_elements"] = self._extract_key_elements(text_input)
+
+        hint_mode = motion_context.get("svg_mode_hint", "none") if isinstance(motion_context, dict) else "none"
+        hint_score = float(motion_context.get("motion_worthiness", 0.0)) if isinstance(motion_context, dict) else 0.0
+        if hint_mode == "animated_svg" or hint_score >= 0.6:
+            parsed["svg_mode"] = "animated_explanatory"
+            parsed["animation_intent"] = "high"
+        else:
+            parsed["svg_mode"] = "static"
 
         return parsed
+
+    def _extract_key_elements(self, text_input: str):
+        words = text_input.split()
+        stop_words = {
+            "the", "is", "are", "was", "and", "but", "or", "this", "that",
+            "with", "for", "from", "not", "can", "will", "has", "have",
+            "about", "into", "what", "when", "how", "why", "also", "very",
+            "they", "them", "where", "there", "like", "good", "just",
+        }
+        elements = []
+        for word in words:
+            clean = word.strip(".,;:!?\"'()[]{}")
+            if len(clean) <= 3 or clean.lower() in stop_words:
+                continue
+            elements.append(clean)
+            if len(elements) >= 4:
+                break
+        return elements or ["Core idea", "Key relation"]
 
     # ================================================================
     #  Fallback
@@ -344,27 +371,16 @@ Return JSON only."""
 
     def _fallback_brief(self, text_input: str) -> Dict:
         """Fallback when LLM is unavailable."""
-        words = text_input.split()
-        stop_words = {
-            "the", "is", "are", "was", "and", "but", "or", "this", "that",
-            "with", "for", "from", "not", "can", "will", "has", "have",
-            "about", "into", "what", "when", "how", "why", "also", "very",
-        }
-        entities = [
-            w.strip(".,;:!?\"'")
-            for w in words
-            if len(w) > 3 and w.lower() not in stop_words
-        ][:5]
-
         return {
             "visual_type": "creative",
             "core_topic": text_input[:80],
-            "entities": [
-                {"label": e, "icon_hint": "simple labeled box"}
-                for e in entities
-            ],
-            "custom_data": {},
+            "display_title": text_input[:28],
+            "display_subtitle": text_input[:80],
+            "key_elements": self._extract_key_elements(text_input),
+            "layout_concept": "Use a balanced composition with one focal visual and supporting elements around it.",
             "scene_alignment": "general educational diagram",
             "style_directive": "fallback clean lines",
-            "animation_plan": "basic fade in",
+            "animation_intent": "light",
+            "animation_notes": "Add subtle fade-in, line-draw, and pulse motion.",
+            "svg_mode": "static",
         }

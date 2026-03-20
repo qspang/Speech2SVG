@@ -570,6 +570,6 @@ class CustomChatModel(BaseChatModel):
             "gpt4-o",
             "qwen-vl-plus",
             "qwen-vl-max",
-            "claude-sonnet-4-5-20250929"
+            "claude-sonnet-4-5-20250929",
         ]
         return any(vm in self.llm_type.lower() for vm in vision_models)

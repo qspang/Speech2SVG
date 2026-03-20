@@ -4,6 +4,11 @@ Custom ChatModel for LangGraph
 
 支持的模型:
 - claude-sonnet-4-5-20250929
+- claude-sonnet-4-6
+- claude-opus-4-6-thinking
+- gemini-3.1-pro-high
+- gemini-3.1-pro-low
+- gpt-5.3-codex
 - deepseek-v3
 - deepseek-chat
 - glm-4.6
@@ -53,6 +58,13 @@ class CustomChatModel(BaseChatModel):
             self.client = OpenAI(
                 timeout=DEFAULT_TIMEOUT
             )
+        elif llm_type in ["gemini-3.1-pro-high", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-5.3-codex", "gemini-3.1-pro-low"]:
+            self.client = OpenAI(
+                api_key=os.getenv("XIAOCHI_API_KEY"),
+                base_url="https://llm.xiaochisaas.com/v1",
+                timeout=DEFAULT_TIMEOUT
+            )
+            self.streaming = True
         elif llm_type == "qwen3.5-plus":
             self.client = OpenAI(
                 api_key=os.getenv("PLAN_API_KEY"),
@@ -327,7 +339,7 @@ class CustomChatModel(BaseChatModel):
             else:
                 return self._stream_response(self.llm_type, input_messages, self.glm_max_tokens)
         
-        elif self.llm_type in ["deepseek-chat", "deepseek-v3"]:
+        elif self.llm_type in ["deepseek-chat", "deepseek-v3", "gemini-3.1-pro-high", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-5.3-codex", "gemini-3.1-pro-low"]:
             if not self.streaming:
                 response = self.client.chat.completions.create(
                     model=self.llm_type,
@@ -559,6 +571,11 @@ class CustomChatModel(BaseChatModel):
             "gpt4-o",
             "qwen-vl-plus",
             "qwen-vl-max",
-            "claude-sonnet-4-5-20250929"
+            "claude-sonnet-4-5-20250929",
+            "gemini-3.1-pro-high",
+            "gemini-3.1-pro-low",
+            "claude-sonnet-4-6",
+            "claude-opus-4-6-thinking",
+            "gpt-5.3-codex",
         ]
         return any(vm in self.llm_type.lower() for vm in vision_models)

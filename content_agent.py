@@ -8,6 +8,7 @@ Content Agent
 """
 
 import os
+import json
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from text_agent import TextAgent
@@ -35,7 +36,9 @@ class ContentAgent:
         # 创建assets目录
         self.assets_dir = os.path.join(output_dir, "assets")
         self.svg_dir = os.path.join(self.assets_dir, "svg")
+        self.text_cache_dir = os.path.join(self.assets_dir, "text")
         os.makedirs(self.svg_dir, exist_ok=True)
+        os.makedirs(self.text_cache_dir, exist_ok=True)
     
     def generate_content(
         self,
@@ -165,6 +168,12 @@ class ContentAgent:
         timestamp = point['timestamp']
         scene_info = point.get('scene_info', {})
         layout_info = point.get('layout', {})
+        motion_context = {
+            'svg_mode_hint': point.get('svg_mode_hint', point.get('metadata', {}).get('svg_mode_hint', 'none')),
+            'motion_worthiness': point.get('motion_worthiness', point.get('metadata', {}).get('motion_worthiness', 0.0)),
+            'motion_grammar_hint': point.get('motion_grammar_hint', point.get('metadata', {}).get('motion_grammar_hint', 'none')),
+            'animation_reason': point.get('animation_reason', point.get('metadata', {}).get('animation_reason', '')),
+        }
         
         try:
             import sys
@@ -218,6 +227,7 @@ class ContentAgent:
                 vision_llm_type=self.vision_llm_type,
                 layout_context=layout_context,
                 scene_context=scene_info,
+                motion_context=motion_context,
                 enable_complex_mode=(getattr(self, 'svg_mode', 'simple') == 'complex'),
                 sample_id=actual_sample_id,
                 visual_description=point.get('visual_description', ''),
@@ -313,6 +323,11 @@ class ContentAgent:
     
     def _generate_text_content(self, point: Dict, idx: int) -> Dict:
         """生成文字内容"""
+        cache_name = f"text_{idx}_{int(point['timestamp'])}.txt"
+        cached = self._load_cached_text_content(cache_name, "text_card")
+        if cached:
+            return cached
+
         transcript = point['text']
         duration = point.get('duration', 3.0)
         scene_info = point.get('scene_info', {})
@@ -321,23 +336,58 @@ class ContentAgent:
         text_card = self.text_agent.generate_knowledge_card(
             transcript, scene_info, duration, layout_info
         )
-        
+        self._save_text_content(cache_name, text_card)
         return text_card
 
     def _generate_misconception_content(self, point: Dict, idx: int) -> Dict:
+        cache_name = f"misconception_{idx}_{int(point['timestamp'])}.txt"
+        cached = self._load_cached_text_content(cache_name, "misconception_card")
+        if cached:
+            return cached
+
         payload = point.get('metadata', {}).get('misconception_payload') or point.get('misconception_payload') or {}
-        return self.text_agent.generate_misconception_card(
+        content = self.text_agent.generate_misconception_card(
             point['text'],
             point.get('scene_info', {}),
             payload,
             point.get('layout', {})
         )
+        self._save_text_content(cache_name, content)
+        return content
 
     def _generate_mechanism_chain_content(self, point: Dict, idx: int) -> Dict:
+        cache_name = f"mechanism_{idx}_{int(point['timestamp'])}.txt"
+        cached = self._load_cached_text_content(cache_name, "mechanism_chain")
+        if cached:
+            return cached
+
         payload = point.get('metadata', {}).get('mechanism_payload') or point.get('mechanism_payload') or {}
-        return self.text_agent.generate_mechanism_chain_card(
+        content = self.text_agent.generate_mechanism_chain_card(
             point['text'],
             point.get('scene_info', {}),
             payload,
             point.get('layout', {})
         )
+        self._save_text_content(cache_name, content)
+        return content
+
+    def _load_cached_text_content(self, filename: str, content_kind: str) -> Dict:
+        filepath = os.path.join(self.text_cache_dir, filename)
+        if not os.path.exists(filepath):
+            return {}
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = json.load(f)
+            print(f"      [Cache] Found existing {content_kind} {filename}, skipping generation.")
+            return content
+        except Exception as e:
+            print(f"      [Cache] Failed to load {filename}: {e}")
+            return {}
+
+    def _save_text_content(self, filename: str, content: Dict):
+        filepath = os.path.join(self.text_cache_dir, filename)
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(content, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"      [Cache] Failed to save {filename}: {e}")

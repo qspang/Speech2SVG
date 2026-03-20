@@ -52,6 +52,7 @@ class VisualStrategy:
         text_input: str,
         layout_context: Optional[Dict] = None,
         scene_context: Optional[Dict] = None,
+        motion_context: Optional[Dict] = None,
         visual_description: str = "",
     ) -> Dict[str, Any]:
         """
@@ -68,6 +69,7 @@ class VisualStrategy:
         """
         layout_context = layout_context or {}
         scene_context = scene_context or {}
+        motion_context = motion_context or {}
 
 
         print("==========================================")

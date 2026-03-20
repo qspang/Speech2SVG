@@ -128,6 +128,18 @@ def _fix_css_bugs(svg_content: str) -> Tuple[str, list]:
         )
         fixes.append("Removed <animateMotion> (causes position conflicts)")
 
+    # ── Fix 0.2: Allow safe animateTransform but strip translate ──
+    if "animateTransform" in svg_content:
+        cleaned_svg = re.sub(
+            r"<animateTransform([^>]*?)type\s*=\s*['\"]translate['\"]([^>]*?)(?:/>|>.*?</animateTransform>)",
+            "",
+            svg_content,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if cleaned_svg != svg_content:
+            svg_content = cleaned_svg
+            fixes.append("Removed animateTransform translate (unsafe for overlay positioning)")
+
     # Find <style> blocks
     style_match = re.search(r"<style[^>]*>([\s\S]*?)</style>", svg_content)
     if style_match:

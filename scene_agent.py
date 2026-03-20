@@ -450,8 +450,10 @@ class SceneAgent:
             system_prompt = """You are a High-End Visual Design Director.
             
 Your task: Analyze the visual technical parameters and prescribe a distinct, cohesive ART STYLE for motion graphics that overlays this footage.
+The target tone is scholarly, legible, and publication-friendly rather than flashy product marketing.
 
 **AVOID GENERIC TERMS.** Do not just say "modern" or "clean".
+Prefer styles that could plausibly appear in a research demo, conference talk, or technical explainer.
 
 Output JSON:
 {
@@ -466,10 +468,10 @@ Output JSON:
 }
 
 **STYLE LOGIC:**
-1. **High Tech/Dark**: Use 'Holographic UI' or 'Cyberpunk'. Thin lines, glows, monospaced fonts.
-2. **Nature/Bright**: Use 'Organic Glass' or 'Papercut'. Soft shadows, rounded shapes, serif or rounded fonts.
-3. **Corporate/Clean**: Use 'Swiss International'. Grid-based, heavy bold text, solid colors (no gradients).
-4. **Chaotic/Action**: Use 'Glitch Art'. Asymmetric, jagged shapes, high contrast.
+1. **High Tech/Dark**: Prefer 'Scientific Instrument Panel' or 'Scholarly HUD'. Precise lines, controlled glow, restrained highlights.
+2. **Nature/Bright**: Prefer 'Field Notes Minimal' or 'Editorial Diagram'. Soft contrast, clear shapes, understated depth.
+3. **Corporate/Clean**: Prefer 'Swiss Editorial' or 'Research Poster'. Grid-based, heavy bold text, solid colors, high legibility.
+4. **Chaotic/Action**: Prefer 'Controlled Signal Distortion'. Still readable, structured, and not overly noisy.
 
 **CRITICAL — OVERLAY REGION BLENDING:**
 The SVG overlay will be placed on a specific region of the video frame. You MUST ensure the SVG background blends seamlessly:
@@ -539,7 +541,7 @@ Return JSON only."""
             
             design_guide = json.loads(result_text)
             
-            return design_guide
+            return self._stabilize_design_guide(design_guide, region_context, color_hierarchy)
             
         except Exception as e:
             print(f"      LLM design guide generation failed: {e}, using fallback")
@@ -599,5 +601,44 @@ Return JSON only."""
             'text_style': text_style,
             'recommended_bg': bg,
             'recommended_accent': accent,
-            'recommended_text': text_color
+            'recommended_text': text_color,
+            'recommended_secondary': color_hierarchy['all_colors'][1] if len(color_hierarchy.get('all_colors', [])) > 1 else accent,
+            'svg_bg_opacity': 0.82 if visual_complexity != 'complex' else 0.9,
+            'art_style_name': 'Scholarly Contrast Overlay',
+            'visual_metaphor': 'Layered explanatory plate',
         }
+
+    def _stabilize_design_guide(self, design_guide: Dict, region_context: Dict, color_hierarchy: Dict) -> Dict:
+        region_context = region_context or {}
+        color_hierarchy = color_hierarchy or {}
+
+        bg = design_guide.get('recommended_bg') or region_context.get('region_bg_color') or color_hierarchy.get('background_color', '#111827')
+        accent = design_guide.get('recommended_accent') or color_hierarchy.get('accent_color', '#5b8def')
+        secondary = design_guide.get('recommended_secondary')
+        if not secondary:
+            palette = color_hierarchy.get('all_colors', [])
+            secondary = palette[1] if len(palette) > 1 else accent
+
+        text_color = design_guide.get('recommended_text') or color_hierarchy.get('text_color', '#f8fafc')
+        raw_opacity = design_guide.get('svg_bg_opacity', region_context.get('recommended_svg_opacity', 0.82))
+        try:
+            opacity = float(raw_opacity)
+        except Exception:
+            opacity = 0.82
+        opacity = max(0.78, min(0.94, opacity))
+
+        text_style = design_guide.get('text_style', 'High-contrast scholarly panel')
+        svg_prompt = design_guide.get('svg_prompt', 'Use structured geometry, strong contrast, and restrained motion.')
+
+        design_guide['recommended_bg'] = bg
+        design_guide['recommended_accent'] = accent
+        design_guide['recommended_secondary'] = secondary
+        design_guide['recommended_text'] = text_color
+        design_guide['svg_bg_opacity'] = opacity
+        design_guide['text_style'] = text_style
+        design_guide['svg_prompt'] = svg_prompt
+        if not design_guide.get('art_style_name'):
+            design_guide['art_style_name'] = 'Scholarly Contrast Overlay'
+        if not design_guide.get('visual_metaphor'):
+            design_guide['visual_metaphor'] = 'Layered explanatory plate'
+        return design_guide

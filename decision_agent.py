@@ -280,6 +280,8 @@ Avoid decorative or redundant enhancements, but do not miss clear educational op
    
    Requirement: You should be able to describe a layout with at least 3 meaningful interacting visual elements
    or a genuinely clarifying process/structure that subtitles alone do not convey well.
+   IMPORTANT: whenever the SVG would explain change over time, movement, process, propagation, orbit, transformation,
+   or comparison unfolding step by step, strongly prefer animated_svg over static_svg.
 
 2. Assign "text" (High-Density Information) if the text contains:
    • Key definitions, formulas, or golden rules worth remembering
@@ -299,6 +301,7 @@ Avoid decorative or redundant enhancements, but do not miss clear educational op
   (e.g., "it uses three layers" — context tells you "it" = "neural network")
 • Use the video summary to understand the overall topic and field
 • When in doubt between svg and text, prefer the one that clarifies the idea more
+• When in doubt between animated_svg and static_svg, prefer animated_svg if motion itself explains the concept
 • When in doubt between text and none, prefer text if the segment contains a clear takeaway, terminology, or memorable claim
 • Target a moderate enhancement policy, roughly 28%-40% of segments, not saturation
 
@@ -306,6 +309,10 @@ Avoid decorative or redundant enhancements, but do not miss clear educational op
 {
   "type": "svg" | "text" | "none",
   "visual_description": "If svg: vividly describe the visual layout with specific elements and their arrangement. If text: what key information to display. If none: 'N/A'",
+  "svg_mode_hint": "animated_svg" | "static_svg" | "none",
+  "motion_worthiness": 0.0-1.0,
+  "motion_grammar_hint": "flow" | "orbit" | "cycle" | "transform" | "compare" | "build" | "signal" | "field" | "none",
+  "animation_reason": "If animated_svg, explain what dynamic relationship or process should be shown",
   "information_density": "high" | "medium" | "low",
   "reason": "Brief explanation based on content and context"
 }"""
@@ -333,7 +340,7 @@ Return JSON only."""
             density = parsed.get("information_density", "low")
             conf = {"high": 0.86, "medium": 0.66, "low": 0.36}.get(density, 0.5)
 
-            return {
+            decision = {
                 **segment,
                 "enhancement_type": parsed.get("type", "none"),
                 "visual_description": parsed.get("visual_description", "N/A"),
@@ -341,10 +348,11 @@ Return JSON only."""
                 "reason": parsed.get("reason", "llm_classified"),
                 "confidence": conf,
             }
+            return self._augment_motion_fields(decision, parsed)
 
         except Exception as e:
             print(f"      LLM classification failed: {e}")
-            return simple_classify_segment(segment)
+            return self._augment_motion_fields(simple_classify_segment(segment), {})
 
     def _sparsify_decisions(self, decisions: List[Dict]) -> List[Dict]:
         """Prune low-value enhancements to keep density reasonable."""
@@ -470,3 +478,99 @@ Return JSON only."""
         if text_score >= 0.62:
             return "text", text_score
         return "none", max(svg_score, text_score)
+
+    def _augment_motion_fields(self, decision: Dict, parsed: Dict) -> Dict:
+        """Attach motion-aware routing hints while preserving existing schema."""
+        enhancement_type = decision.get("enhancement_type", "none")
+        default_mode = "none" if enhancement_type != "svg" else "static_svg"
+        svg_mode_hint = str(parsed.get("svg_mode_hint", default_mode)).strip() or default_mode
+        motion_grammar_hint = self._normalize_motion_grammar(parsed.get("motion_grammar_hint", "none"))
+        animation_reason = str(parsed.get("animation_reason", "")).strip()
+
+        try:
+            motion_worthiness = float(parsed.get("motion_worthiness", 0.0))
+        except Exception:
+            motion_worthiness = 0.0
+
+        heuristic_mode, heuristic_motion_score, heuristic_grammar, heuristic_reason = self._infer_motion_from_text(
+            decision.get("text", ""),
+            decision.get("visual_description", ""),
+            enhancement_type,
+        )
+
+        if enhancement_type != "svg":
+            svg_mode_hint = "none"
+            motion_grammar_hint = "none"
+            motion_worthiness = 0.0
+            animation_reason = ""
+        else:
+            if svg_mode_hint not in ("animated_svg", "static_svg"):
+                svg_mode_hint = heuristic_mode
+            motion_worthiness = max(motion_worthiness, heuristic_motion_score)
+            if motion_grammar_hint == "none":
+                motion_grammar_hint = heuristic_grammar
+            if not animation_reason:
+                animation_reason = heuristic_reason
+            if motion_worthiness >= 0.56 and motion_grammar_hint != "none":
+                svg_mode_hint = "animated_svg"
+            elif svg_mode_hint != "animated_svg":
+                svg_mode_hint = "static_svg"
+
+        decision["svg_mode_hint"] = svg_mode_hint
+        decision["motion_worthiness"] = round(max(0.0, min(1.0, motion_worthiness)), 3)
+        decision["motion_grammar_hint"] = motion_grammar_hint
+        decision["animation_reason"] = animation_reason
+        return decision
+
+    def _normalize_motion_grammar(self, value: str) -> str:
+        grammar = str(value or "none").strip().lower().replace("-", "_").replace(" ", "_")
+        valid = {"flow", "orbit", "cycle", "transform", "compare", "build", "signal", "field", "none"}
+        if grammar not in valid:
+            return "none"
+        return grammar
+
+    def _infer_motion_from_text(self, text: str, visual_description: str, enhancement_type: str):
+        if enhancement_type != "svg":
+            return "none", 0.0, "none", ""
+
+        lowered = f"{text} {visual_description}".lower()
+        grammar_markers = {
+            "orbit": ["orbit", "around", "revolve", "satellite", "moon", "planet", "solar"],
+            "flow": ["flow", "pipeline", "input", "output", "through", "step", "stage", "feeds", "passes"],
+            "cycle": ["cycle", "loop", "feedback", "iterate", "iteration", "repeats", "circular"],
+            "transform": ["transform", "convert", "encode", "decode", "turns into", "becomes", "mapped"],
+            "compare": ["vs", "versus", "compare", "comparison", "before", "after", "tradeoff"],
+            "build": ["layer", "hierarchy", "build", "stack", "compose", "expand", "grows"],
+            "signal": ["signal", "transmit", "propagate", "send", "receive", "activation", "node"],
+            "field": ["field", "wave", "diffusion", "spread", "fluid", "force", "particle"],
+        }
+
+        best_grammar = "none"
+        best_score = 0.0
+        for grammar, markers in grammar_markers.items():
+            score = sum(1 for marker in markers if marker in lowered)
+            if score > best_score:
+                best_score = score
+                best_grammar = grammar
+
+        motion_score = min(0.9, 0.22 * best_score)
+        if any(token in lowered for token in ("first", "then", "finally", "before", "after", "while")):
+            motion_score += 0.14
+        if any(token in lowered for token in ("cause", "effect", "leads to", "results in", "because")):
+            motion_score += 0.12
+        motion_score = max(0.0, min(1.0, motion_score))
+
+        if best_grammar == "none" or motion_score < 0.38:
+            return "static_svg", motion_score, "none", ""
+
+        grammar_reasons = {
+            "orbit": "Use orbital motion to explain a center-periphery or revolving relationship.",
+            "flow": "Use directional flow to show how information or states move through stages.",
+            "cycle": "Use looping motion to make repeated or feedback behavior explicit.",
+            "transform": "Use transformation motion to show state or representation change over time.",
+            "compare": "Use staged contrast to reveal differences across parallel entities.",
+            "build": "Use progressive build-up to explain layered or hierarchical structure.",
+            "signal": "Use signal propagation to show transmission or activation across entities.",
+            "field": "Use field-like motion to show distributed dynamics such as waves or diffusion.",
+        }
+        return "animated_svg", motion_score, best_grammar, grammar_reasons.get(best_grammar, "")

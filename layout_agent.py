@@ -84,7 +84,12 @@ class LayoutProcessor:
     def _calculate_layout_for_decision(self, idx: int, dec: Dict):
         start_time = dec['start']
         duration = dec['end'] - dec['start']
-        layout = self.calculate_single_layout(start_time, duration, dec['enhancement_type'])
+        layout = self.calculate_single_layout(
+            start_time,
+            duration,
+            dec['enhancement_type'],
+            dec.get('svg_mode_hint', 'none')
+        )
         if layout is None:
             return idx, None, start_time, None
 
@@ -98,6 +103,11 @@ class LayoutProcessor:
             'content_type': self._map_enhancement_to_content_type(final_type),
             'text': dec['text'],
             'enhancement_type': final_type,
+            'visual_description': dec.get('visual_description', ''),
+            'svg_mode_hint': dec.get('svg_mode_hint', 'none'),
+            'motion_worthiness': dec.get('motion_worthiness', 0.0),
+            'motion_grammar_hint': dec.get('motion_grammar_hint', 'none'),
+            'animation_reason': dec.get('animation_reason', ''),
             'layout': layout,
             'metadata': {
                 'start': dec['start'],
@@ -105,6 +115,10 @@ class LayoutProcessor:
                 'confusion_risk': dec.get('confusion_risk'),
                 'misconception_payload': dec.get('misconception_payload'),
                 'mechanism_payload': dec.get('mechanism_payload'),
+                'svg_mode_hint': dec.get('svg_mode_hint', 'none'),
+                'motion_worthiness': dec.get('motion_worthiness', 0.0),
+                'motion_grammar_hint': dec.get('motion_grammar_hint', 'none'),
+                'animation_reason': dec.get('animation_reason', ''),
             }
         }
         return idx, point, start_time, layout
@@ -113,7 +127,8 @@ class LayoutProcessor:
         self,
         start_time: float,
         duration: float,
-        content_type: str
+        content_type: str,
+        svg_mode_hint: str = 'none'
     ) -> Dict:
         """
         计算单个时间段的最佳布局
@@ -144,7 +159,7 @@ class LayoutProcessor:
                 return self._create_fallback_layout(content_type)
             
             # 全图搜索最佳位置
-            best_layout = self._full_screen_search(frames, content_type)
+            best_layout = self._full_screen_search(frames, content_type, svg_mode_hint=svg_mode_hint)
             
             return best_layout
             
@@ -180,6 +195,7 @@ class LayoutProcessor:
         self,
         frames: List,
         content_type: str,
+        svg_mode_hint: str = 'none',
         overlay_w: int = None,
         overlay_h: int = None
     ) -> Dict:
@@ -189,7 +205,10 @@ class LayoutProcessor:
         """
         if overlay_w is None or overlay_h is None:
             if content_type == 'svg':
-                overlay_w, overlay_h = 640, 360
+                if svg_mode_hint == 'animated_svg':
+                    overlay_w, overlay_h = 760, 430
+                else:
+                    overlay_w, overlay_h = 640, 360
             elif content_type == 'mechanism_chain':
                 overlay_w, overlay_h = 760, 260
             elif content_type == 'misconception':
@@ -486,11 +505,11 @@ class LayoutProcessor:
             
             # 推荐 SVG 背景不透明度
             if region_type == 'solid':
-                recommended_opacity = 0.0   # 纯色区域可以完全透明
+                recommended_opacity = 0.58  # 保持一定融入感，同时保证可读性
             elif region_type == 'gradient':
-                recommended_opacity = 0.6   # 渐变区域半透明
+                recommended_opacity = 0.72  # 渐变区域需要更稳的底
             else:
-                recommended_opacity = 0.85  # 复杂区域需要较高不透明度
+                recommended_opacity = 0.88  # 复杂区域需要较高不透明度
             
             # 对比文字色
             contrast_text = '#ffffff' if avg_brightness < 128 else '#000000'
@@ -527,7 +546,7 @@ class LayoutProcessor:
         """创建fallback布局"""
         # 根据content_type决定容器尺寸
         if content_type == 'svg':
-            width, height = 640, 360  # SVG使用合理比例的容器
+            width, height = 720, 420  # SVG使用更大容器，优先保证可读性
             x, y = 100, 50  # 稍微右移避免完全在角落
         else:
             width, height = 350, 200  # 文本使用小容器
@@ -573,6 +592,11 @@ class LayoutProcessor:
                     'content_type': self._map_enhancement_to_content_type(dec['enhancement_type']),
                     'text': dec['text'],
                     'enhancement_type': dec['enhancement_type'],
+                    'visual_description': dec.get('visual_description', ''),
+                    'svg_mode_hint': dec.get('svg_mode_hint', 'none'),
+                    'motion_worthiness': dec.get('motion_worthiness', 0.0),
+                    'motion_grammar_hint': dec.get('motion_grammar_hint', 'none'),
+                    'animation_reason': dec.get('animation_reason', ''),
                     'layout': layout,
                     'metadata': {
                         'start': dec['start'],
@@ -580,6 +604,10 @@ class LayoutProcessor:
                         'confusion_risk': dec.get('confusion_risk'),
                         'misconception_payload': dec.get('misconception_payload'),
                         'mechanism_payload': dec.get('mechanism_payload'),
+                        'svg_mode_hint': dec.get('svg_mode_hint', 'none'),
+                        'motion_worthiness': dec.get('motion_worthiness', 0.0),
+                        'motion_grammar_hint': dec.get('motion_grammar_hint', 'none'),
+                        'animation_reason': dec.get('animation_reason', ''),
                     }
                 }
                 points.append(point)
@@ -593,6 +621,11 @@ class LayoutProcessor:
                 'content_type': self._map_enhancement_to_content_type(dec['enhancement_type']),
                 'text': dec['text'],
                 'enhancement_type': dec['enhancement_type'],
+                'visual_description': dec.get('visual_description', ''),
+                'svg_mode_hint': dec.get('svg_mode_hint', 'none'),
+                'motion_worthiness': dec.get('motion_worthiness', 0.0),
+                'motion_grammar_hint': dec.get('motion_grammar_hint', 'none'),
+                'animation_reason': dec.get('animation_reason', ''),
                 'layout': self._create_fallback_layout(dec['enhancement_type']),
                 'metadata': {
                     'start': dec['start'],
@@ -600,5 +633,9 @@ class LayoutProcessor:
                     'confusion_risk': dec.get('confusion_risk'),
                     'misconception_payload': dec.get('misconception_payload'),
                     'mechanism_payload': dec.get('mechanism_payload'),
+                    'svg_mode_hint': dec.get('svg_mode_hint', 'none'),
+                    'motion_worthiness': dec.get('motion_worthiness', 0.0),
+                    'motion_grammar_hint': dec.get('motion_grammar_hint', 'none'),
+                    'animation_reason': dec.get('animation_reason', ''),
                 }
             } for dec in decisions if dec['enhancement_type'] != 'none']

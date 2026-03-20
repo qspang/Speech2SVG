@@ -8,6 +8,7 @@ Multimodal Analyzer
 import os
 import numpy as np
 from typing import List, Dict, Any, Optional
+from copy import deepcopy
 
 # 导入工具函数
 from multimodal_utils import (
@@ -87,6 +88,43 @@ class MultimodalAnalyzer:
         print(f"✓ MultimodalAnalyzer initialized")
         print(f"  Output dir: {self.output_dir}")
         print(f"  SVG mode: {self.svg_mode.capitalize()}")
+
+    def _apply_feature_flags_to_decisions(
+        self,
+        decisions: List[Dict[str, Any]],
+        persist: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Normalize cached/routed decisions so disabled features cannot leak downstream."""
+        sanitized = []
+        changed = 0
+
+        for decision in decisions or []:
+            dec = deepcopy(decision)
+            etype = dec.get("enhancement_type", "none")
+
+            if etype == "misconception" and not self.enable_misconception:
+                dec["enhancement_type"] = "text"
+                dec.pop("misconception_payload", None)
+                dec.pop("confusion_risk", None)
+                reason = dec.get("reason", "flag_disabled")
+                dec["reason"] = f"{reason} | misconception_disabled"
+                changed += 1
+
+            if dec.get("enhancement_type") == "mechanism_chain" and not self.enable_mechanism_chain:
+                dec["enhancement_type"] = "svg"
+                dec.pop("mechanism_payload", None)
+                reason = dec.get("reason", "flag_disabled")
+                dec["reason"] = f"{reason} | mechanism_disabled"
+                changed += 1
+
+            sanitized.append(dec)
+
+        if changed:
+            print(f"  > Feature flags normalized {changed} cached/routed decisions")
+            if persist:
+                save_decisions(sanitized, os.path.join(self.output_dir, "enhancement_decisions.txt"))
+
+        return sanitized
     
     # ========== Phase 1 & 2: Whisper + 语义聚合 ==========
     
@@ -274,6 +312,7 @@ class MultimodalAnalyzer:
         # 调用DecisionAgent
         decisions = self.decision_agent.classify_segments(segments, force_reprocess, max_workers=self.max_workers)
         self.global_summary = self.decision_agent.latest_global_summary
+        decisions = self._apply_feature_flags_to_decisions(decisions, persist=True)
 
         if self.enable_misconception:
             print("  > Running misconception analysis...")
@@ -293,6 +332,10 @@ class MultimodalAnalyzer:
                 segments, decisions, self.global_summary, force_reprocess
             )
             print(f"  > Concept graph ready: {len(self.global_concept_graph.get('nodes', []))} nodes")
+        else:
+            self.global_concept_graph = {}
+
+        decisions = self._apply_feature_flags_to_decisions(decisions)
 
         # Persist the post-routing decisions so downstream cached phases can
         # restore misconception/mechanism types and payloads correctly.
@@ -311,6 +354,7 @@ class MultimodalAnalyzer:
         if decisions is None:
             from multimodal_utils import load_decisions
             decisions = load_decisions(os.path.join(self.output_dir, "enhancement_decisions.txt"))
+        decisions = self._apply_feature_flags_to_decisions(decisions, persist=not force_reprocess)
         
         print("\n" + "="*70)
         print("PHASE 4: Layout with Saliency Detection")
@@ -339,6 +383,7 @@ class MultimodalAnalyzer:
         if enhancement_points is None:
             from multimodal_utils import load_decisions
             decisions = load_decisions(os.path.join(self.output_dir, "enhancement_decisions.txt"))
+            decisions = self._apply_feature_flags_to_decisions(decisions, persist=not force_reprocess)
             enhancement_points = self.analyze_video_phase4(decisions, force_reprocess)
         
         print("\n" + "="*70)
@@ -368,6 +413,7 @@ class MultimodalAnalyzer:
         if enhancement_points is None:
             from multimodal_utils import load_decisions
             decisions = load_decisions(os.path.join(self.output_dir, "enhancement_decisions.txt"))
+            decisions = self._apply_feature_flags_to_decisions(decisions, persist=not force_reprocess)
             points = self.analyze_video_phase4(decisions, force_reprocess)
             points = self.analyze_video_phase5(points, force_reprocess)
             enhancement_points = points
