@@ -33,3 +33,36 @@ git reset --hard HEAD
 # 清除任何新产生但未跟进 (untracked) 的冗余文件
 git clean -fd
 ```
+
+---
+
+## 3. 当前阶段性存档记录
+
+下面这条记录对应当前已经完成的界面状态：
+
+- 左下角为“增强内容画廊”
+- 右侧为“字幕 + 全局概念图”
+- 当前后续开发将基于这个版本继续做新的布局探索
+
+具体存档信息如下：
+
+- 备份分支：`backup/gallery-bottom-rightpanel-20260320`
+- 提交号（short hash）：`de353af`
+- 提交说明：`backup: left-bottom gallery right transcript concept layout`
+
+如果你之后想回到这个版本，可以在终端运行：
+
+```bash
+cd /home/ubuntu/sysu/svgagent/video_enhance/video_sys
+
+# 切换到这个备份分支
+git switch backup/gallery-bottom-rightpanel-20260320
+
+# 或者直接切到这个提交
+git checkout de353af
+```
+
+说明：
+
+- `backup/gallery-bottom-rightpanel-20260320` 是“左下增强内容画廊、右侧字幕和全局概念图”这个布局版本的稳定存档点。
+- 接下来如果继续开发新的布局，建议都以这个分支/提交作为回退基准。

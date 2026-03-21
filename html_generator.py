@@ -192,42 +192,6 @@ class HTMLGenerator:
                 </div>
 
             </div>
-            <div class="bottom-row">
-                <div class="gallery-section">
-                    <div class="gallery-header">
-                        <h3>增强内容画廊</h3>
-                        <span class="gallery-count" id="galleryCount">0 个增强点</span>
-                    </div>
-                    <div class="gallery-toolbar">
-                        <div class="gallery-view-chip" id="galleryViewChip">分类模式</div>
-                        <div class="gallery-filter-wrap">
-                            <button class="gallery-filter-btn" id="galleryFilterBtn" onclick="toggleGalleryMenu(event)" title="切换画廊视图">
-                                <span>筛选</span>
-                                <span>⌄</span>
-                            </button>
-                            <div class="gallery-filter-menu" id="galleryFilterMenu">
-                                <button onclick="setTimelineSort('time')">时间排序</button>
-                                <button onclick="setGalleryMode('category')">按分类排序</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="gallery-viewport" id="galleryViewport"></div>
-                    <div class="gallery-source" id="gallerySource">
-                    <!-- GALLERY_MARKER -->
-                    </div>
-                    <div class="gallery-empty" id="galleryEmpty">
-                        <p>等待内容生成中...</p>
-                        <p class="hint">生成的 SVG 与文字内容会显示在这里</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <button class="subtitle-toggle" id="subtitleToggle" onclick="toggleTranscriptPanel()" title="收起/展开字幕面板">
-            <span id="subtitleToggleIcon">→</span>
-        </button>
-
-        <div class="right-panel" id="rightPanel">
             <div class="subtitle-section">
                 <div class="subtitle-header">
                     <h3>字幕</h3>
@@ -237,6 +201,65 @@ class HTMLGenerator:
 {subtitle_entries_html}
                 </div>
             </div>
+        </div>
+
+        <div class="middle-panel">
+            <div class="gallery-section">
+                <div class="gallery-header">
+                    <h3>增强内容画廊</h3>
+                    <div class="gallery-toolbar">
+                        <div class="gallery-view-chip" id="galleryViewChip">分类排序</div>
+                        <div class="gallery-filter-wrap">
+                            <button class="gallery-filter-btn" id="galleryFilterBtn" onclick="toggleGalleryMenu(event)" title="切换画廊视图">
+                                <span>筛选</span>
+                                <span>⌄</span>
+                            </button>
+                            <div class="gallery-filter-menu" id="galleryFilterMenu">
+                                <button onclick="setTimelineSort('time')">按时间排序</button>
+                                <button onclick="setGalleryMode('category')">按分类排序</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                    <div class="gallery-viewport" id="galleryViewport">
+                        <div class="gallery-home">
+                            <div class="gallery-category-card mechanism-card">
+                                <div class="gallery-category-icon">⚙</div>
+                                <div class="gallery-category-copy">
+                                    <div class="gallery-category-title">机制链</div>
+                                    <div class="gallery-category-desc">用于展示过程、链路与机制关系</div>
+                                </div>
+                                <button class="gallery-enter-btn" onclick="openGalleryDetail('mechanism')">→</button>
+                            </div>
+                            <div class="gallery-category-card text-card">
+                                <div class="gallery-category-icon">文</div>
+                                <div class="gallery-category-copy">
+                                    <div class="gallery-category-title">文字</div>
+                                    <div class="gallery-category-desc">用于浏览文字说明与文本增强</div>
+                                </div>
+                                <button class="gallery-enter-btn" onclick="openGalleryDetail('text')">→</button>
+                            </div>
+                            <div class="gallery-category-card image-card">
+                                <div class="gallery-category-icon">图</div>
+                                <div class="gallery-category-copy">
+                                    <div class="gallery-category-title">图片</div>
+                                    <div class="gallery-category-desc">用于浏览 SVG / 图像增强内容</div>
+                                </div>
+                                <button class="gallery-enter-btn" onclick="openGalleryDetail('image')">→</button>
+                            </div>
+                        </div>
+                    </div>
+                <div class="gallery-source" id="gallerySource">
+                <!-- GALLERY_MARKER -->
+                </div>
+                <div class="gallery-empty" id="galleryEmpty">
+                    <p>等待内容生成中...</p>
+                    <p class="hint">生成的 SVG 与文字内容会显示在这里</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-panel" id="rightPanel">
             {concept_graph_html}
         </div>
     </div>
@@ -826,41 +849,41 @@ class HTMLGenerator:
         /* ========== Main Layout ========== */
         .main-content {
             display: grid;
-            grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1.3fr);
+            grid-template-columns: minmax(0, 9fr) minmax(340px, 4fr) minmax(220px, 2fr);
             height: calc(100vh - var(--header-height));
             position: relative;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-secondary);
         }
 
         .left-panel {
             display: grid;
-            grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
-            border-right: 1px solid var(--border);
+            grid-template-rows: minmax(0, 2.2fr) minmax(0, 1fr);
             min-width: 0;
             min-height: 0;
             background: var(--bg-primary);
             overflow: hidden;
+            gap: 12px;
         }
 
-        .main-content.transcript-collapsed {
-            grid-template-columns: minmax(0, 1fr) 0;
+        .middle-panel,
+        .right-panel {
+            min-width: 0;
+            min-height: 0;
+        }
+
+        .middle-panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
         .right-panel {
-            display: grid;
-            grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
-            min-width: 0;
-            background: var(--bg-secondary);
-            transition: width 0.25s ease, opacity 0.25s ease, transform 0.25s ease;
-            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
             overflow: hidden;
-            gap: 12px;
-            padding: 12px;
-        }
-
-        .main-content.transcript-collapsed .right-panel {
-            opacity: 0;
-            pointer-events: none;
-            transform: translateX(16px);
+            background: transparent;
         }
 
         .subtitle-section {
@@ -875,42 +898,17 @@ class HTMLGenerator:
             box-shadow: 0 10px 28px rgba(74,121,186,0.08);
         }
 
-        .subtitle-toggle {
-            position: absolute;
-            top: 50%;
-            right: calc(43.33% - 18px);
-            transform: translateY(-50%);
-            width: 36px;
-            height: 36px;
-            border-radius: 999px;
-            border: 1px solid var(--border);
-            background: rgba(255,255,255,0.96);
-            box-shadow: 0 8px 24px rgba(47,111,178,0.12);
-            color: var(--accent);
-            font-size: 20px;
-            cursor: pointer;
-            z-index: 20;
-            transition: right 0.25s ease, transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .subtitle-toggle:hover {
-            transform: translateY(-50%) scale(1.04);
-            box-shadow: 0 12px 30px rgba(47,111,178,0.18);
-        }
-
-        .main-content.transcript-collapsed .subtitle-toggle {
-            right: 10px;
-        }
-
         /* ========== Video Section ========== */
         .video-section {
             display: flex;
             flex-direction: column;
             background: #000;
-            border-bottom: 1px solid var(--border);
             min-height: 0;
             height: 100%;
             overflow: hidden;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 28px rgba(74,121,186,0.08);
         }
 
         .bottom-row {
@@ -1404,7 +1402,7 @@ class HTMLGenerator:
         }
 
         .gallery-header {
-            padding: 12px 16px;
+            padding: 12px 14px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -1423,10 +1421,9 @@ class HTMLGenerator:
         }
 
         .gallery-toolbar {
-            padding: 8px 14px 0;
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-end;
             gap: 10px;
             flex-shrink: 0;
         }
@@ -1502,7 +1499,7 @@ class HTMLGenerator:
             flex: 1;
             height: 100%;
             overflow-y: auto;
-            padding: 6px 10px 10px;
+            padding: 10px;
             min-height: 0;
             position: relative;
         }
@@ -1526,23 +1523,25 @@ class HTMLGenerator:
         }
 
         .gallery-home {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
             align-items: stretch;
+            height: 100%;
         }
 
         .gallery-category-card {
-            border-radius: 28px;
+            border-radius: 24px;
             border: 1px solid var(--border);
             background: linear-gradient(180deg, #4a79ba 0%, #5d91cb 100%);
             color: #ffffff;
-            min-height: 100%;
-            display: flex;
-            flex-direction: column;
+            min-height: 0;
+            flex: 1 1 0;
+            display: grid;
+            grid-template-columns: 52px minmax(0, 1fr) 44px;
             align-items: center;
-            justify-content: space-between;
-            padding: 12px 12px 10px;
+            gap: 14px;
+            padding: 18px 20px;
             box-shadow: 0 16px 36px rgba(47,111,178,0.16);
         }
 
@@ -1557,15 +1556,15 @@ class HTMLGenerator:
         }
 
         .gallery-category-icon {
-            width: 40px;
-            height: 40px;
+            width: 52px;
+            height: 52px;
             border-radius: 50%;
             background: rgba(255,255,255,0.92);
             color: var(--accent);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 24px;
             font-weight: 700;
             box-shadow: inset 0 0 0 1px rgba(47,111,178,0.08);
         }
@@ -1579,19 +1578,20 @@ class HTMLGenerator:
         .gallery-category-copy {
             display: flex;
             flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            text-align: center;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 6px;
+            text-align: left;
         }
 
         .gallery-category-title {
-            font-size: 15px;
+            font-size: 20px;
             font-weight: 700;
         }
 
         .gallery-category-desc {
-            font-size: 11px;
-            line-height: 1.45;
+            font-size: 13px;
+            line-height: 1.5;
             color: rgba(255,255,255,0.80);
         }
 
@@ -1603,8 +1603,8 @@ class HTMLGenerator:
         .gallery-enter-btn,
         .gallery-back-btn,
         .gallery-nav-btn {
-            width: 54px;
-            height: 54px;
+            width: 50px;
+            height: 50px;
             border-radius: 50%;
             border: none;
             background: rgba(255,255,255,0.94);
@@ -1620,10 +1620,9 @@ class HTMLGenerator:
         .gallery-detail-layout {
             min-height: 100%;
             height: 100%;
-            display: grid;
-            grid-template-columns: 156px minmax(0, 1fr);
+            display: flex;
+            flex-direction: column;
             gap: 10px;
-            align-items: stretch;
             overflow: hidden;
         }
 
@@ -1633,23 +1632,20 @@ class HTMLGenerator:
 
         .gallery-side {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             gap: 8px;
             position: sticky;
             top: 0;
-            align-self: start;
             z-index: 4;
             height: max-content;
             min-height: 0;
+            align-items: center;
         }
 
         .gallery-action-stack {
             display: flex;
-            flex-direction: column;
-            gap: 10px;
-            align-items: flex-start;
-            position: sticky;
-            top: 0;
+            align-items: center;
+            justify-content: center;
             z-index: 5;
         }
 
@@ -1671,15 +1667,15 @@ class HTMLGenerator:
         }
 
         .gallery-side-card {
-            border-radius: 20px;
+            border-radius: 18px;
             background: linear-gradient(180deg, #eaf3fd 0%, #d9e9fb 100%);
-            padding: 10px 10px 12px;
+            padding: 10px 12px;
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             align-items: center;
             justify-content: flex-start;
-            gap: 8px;
-            min-height: 156px;
+            gap: 10px;
+            min-height: 64px;
             box-shadow: 0 12px 28px rgba(31, 64, 114, 0.10);
         }
 
@@ -1688,14 +1684,16 @@ class HTMLGenerator:
         }
 
         .gallery-side-card .gallery-category-icon {
-            width: 54px;
-            height: 54px;
+            width: 36px;
+            height: 36px;
+            flex: 0 0 auto;
         }
 
         .gallery-side-card .gallery-category-copy {
-            flex: 0 0 auto;
+            flex: 1 1 auto;
             justify-content: flex-start;
             gap: 2px;
+            min-width: 0;
         }
 
         .gallery-side-card .gallery-category-title {
@@ -1722,13 +1720,14 @@ class HTMLGenerator:
         }
 
         .gallery-detail-item {
-            border-radius: 999px;
-            background: #edf5fd;
-            border: 1px solid #d7e6f5;
-            padding: 14px 18px;
+            border-radius: 16px;
+            background: linear-gradient(180deg, #f8fbff 0%, #edf5fd 100%);
+            border: 1px solid #cfe1f4;
+            padding: 12px 14px;
             display: flex;
-            align-items: center;
-            gap: 14px;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 7px;
             cursor: pointer;
             transition: transform 0.18s ease, box-shadow 0.18s ease;
             margin-bottom: 10px;
@@ -1751,50 +1750,66 @@ class HTMLGenerator:
         }
 
         .gallery-detail-time {
-            min-width: 54px;
             font-size: 12px;
             font-weight: 700;
             color: var(--accent);
         }
 
-        .gallery-detail-text {
-            font-size: 13px;
-            line-height: 1.55;
+        .gallery-detail-title {
+            font-size: 14px;
+            line-height: 1.45;
+            font-weight: 700;
             color: var(--text-primary);
+        }
+
+        .gallery-detail-subtext {
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text-muted);
         }
 
         .gallery-image-detail {
             min-height: 100%;
             height: 100%;
-            display: grid;
-            grid-template-columns: 72px minmax(0, 1fr);
+            display: flex;
+            flex-direction: column;
             gap: 10px;
             align-items: stretch;
         }
 
         .gallery-image-main {
-            min-height: 100%;
+            min-height: 0;
             height: 100%;
-            display: grid;
-            grid-template-columns: minmax(0, 1.45fr) minmax(220px, 0.95fr);
-            gap: 10px;
-            align-items: stretch;
-            align-content: stretch;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .gallery-image-card {
+            background: linear-gradient(180deg, #ffffff 0%, #f3f8fe 100%);
+            border: 1px solid var(--border);
+            border-radius: 22px;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            cursor: pointer;
+            min-height: 280px;
+            box-shadow: 0 10px 24px rgba(47,111,178,0.08);
         }
 
         .gallery-image-stage {
             position: relative;
             background: #edf5fd;
-            border: 1px solid var(--border);
-            border-radius: 24px;
-            min-height: 0;
-            height: 100%;
+            border-bottom: 1px solid var(--border);
+            min-height: 220px;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
-            padding: 10px 36px;
+            padding: 14px 18px;
         }
 
         .gallery-back-btn {
@@ -1804,25 +1819,24 @@ class HTMLGenerator:
         }
 
         .gallery-image-stage img {
-            max-width: 100%;
-            max-height: 100%;
+            width: 100%;
+            height: 100%;
+            max-width: none;
+            max-height: none;
             object-fit: contain;
             border-radius: 14px;
             box-shadow: 0 12px 28px rgba(47,111,178,0.14);
         }
 
         .gallery-image-caption {
-            border-radius: 18px;
             background: #ffffff;
-            border: 1px solid var(--border);
-            padding: 14px 16px;
+            padding: 12px 14px 14px;
             color: var(--text-secondary);
             font-size: 13px;
             line-height: 1.65;
             display: flex;
             flex-direction: column;
-            justify-content: center;
-            height: 100%;
+            justify-content: flex-start;
         }
 
         .gallery-nav-btn {
@@ -1835,9 +1849,8 @@ class HTMLGenerator:
         .gallery-nav-btn.next-btn { right: 16px; }
 
         .gallery-mode-timeline {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            grid-auto-rows: min-content;
+            display: flex;
+            flex-direction: column;
             gap: 12px;
             min-height: 0;
         }
@@ -1847,11 +1860,13 @@ class HTMLGenerator:
             border: 1px solid var(--border);
             border-radius: 22px;
             overflow: hidden;
-            display: grid;
-            grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+            display: flex;
+            flex-direction: column;
             cursor: pointer;
             transition: all 0.2s;
-            min-height: 186px;
+            min-height: 124px;
+            padding: 12px;
+            gap: 10px;
         }
 
         .timeline-card:hover {
@@ -1863,19 +1878,18 @@ class HTMLGenerator:
         .timeline-top {
             position: relative;
             min-height: 0;
-            background: #ecf4fd;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 12px 12px 8px;
+            align-items: flex-start;
+            justify-content: flex-start;
+            gap: 6px;
+            padding: 0;
         }
 
         .timeline-time {
             position: absolute;
-            top: 12px;
-            left: 12px;
+            top: 0;
+            right: 0;
             padding: 5px 10px;
             border-radius: 999px;
             background: rgba(255,255,255,0.94);
@@ -1886,41 +1900,84 @@ class HTMLGenerator:
         }
 
         .timeline-icon {
-            width: 44px;
-            height: 44px;
+            width: 34px;
+            height: 34px;
             border-radius: 50%;
             background: #ffffff;
             color: var(--accent);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 700;
+            border: 1px solid var(--border);
+        }
+
+        .timeline-media {
+            width: 100%;
+            min-height: 92px;
+            max-height: 120px;
+            border-radius: 14px;
+            overflow: hidden;
+            background: #eef5fd;
+            border: 1px solid #d8e7f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 0 1px rgba(108, 152, 209, 0.05);
+        }
+
+        .timeline-media img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
         }
 
         .timeline-title {
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 700;
             color: var(--text-primary);
         }
 
-        .timeline-bottom {
+        .timeline-production {
+            display: block;
+            font-size: 14px;
+            font-weight: 700;
+            color: #2c62a7;
+            margin-top: 2px;
+        }
+
+        .timeline-summary-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 6px 10px;
+            border-radius: 12px;
             background: #ffffff;
+            border: 1px solid #d9e7f4;
+            color: var(--text-primary);
+            font-size: 12px;
+            box-shadow: inset 0 0 0 1px rgba(108, 152, 209, 0.05);
+        }
+
+        .timeline-bottom {
             display: flex;
             align-items: flex-start;
             justify-content: flex-start;
-            padding: 12px 14px;
-            font-size: 13px;
+            padding: 0;
+            font-size: 11px;
             color: var(--text-primary);
             line-height: 1.45;
             text-align: left;
             overflow: hidden;
             display: -webkit-box;
-            -webkit-line-clamp: 4;
+            -webkit-line-clamp: 3;
             -webkit-box-orient: vertical;
         }
 
         .gallery-empty {
+            display: none;
             padding: 40px 20px;
             text-align: center;
             color: var(--text-muted);
@@ -1942,6 +1999,7 @@ class HTMLGenerator:
             gap: 10px;
             overflow: hidden;
             min-height: 0;
+            height: 100%;
             box-shadow: 0 10px 28px rgba(74,121,186,0.08);
         }
 
@@ -2290,8 +2348,6 @@ class HTMLGenerator:
         const galleryViewChip = document.getElementById('galleryViewChip');
         const galleryFilterMenu = document.getElementById('galleryFilterMenu');
         const galleryToolbar = document.querySelector('.gallery-toolbar');
-        const mainContent = document.getElementById('mainContent');
-        const subtitleToggleIcon = document.getElementById('subtitleToggleIcon');
 
         // ========== State ==========
         let overlaysEnabled = true;
@@ -2350,11 +2406,13 @@ class HTMLGenerator:
         }});
 
         // Detect user scrolling in subtitle panel
-        subtitleList.addEventListener('scroll', function() {{
-            isUserScrollingSubs = true;
-            clearTimeout(scrollTimeout);
-            scrollTimeout = setTimeout(() => {{ isUserScrollingSubs = false; }}, 3000);
-        }});
+        if (subtitleList) {{
+            subtitleList.addEventListener('scroll', function() {{
+                isUserScrollingSubs = true;
+                clearTimeout(scrollTimeout);
+                scrollTimeout = setTimeout(() => {{ isUserScrollingSubs = false; }}, 3000);
+            }});
+        }}
 
         // ========== Overlay Container 自适应 ==========
         // 当视频使用 object-fit: cover 时，让 overlay 覆盖整个视频框
@@ -2383,6 +2441,10 @@ class HTMLGenerator:
             updateGalleryCount();
         }});
 
+        function ensureGalleryReady() {{
+            updateGalleryCount();
+        }}
+
         // ========== Jump to time ==========
         function jumpTo(time) {{
             video.currentTime = time;
@@ -2406,12 +2468,6 @@ class HTMLGenerator:
 
         // Init toggle button state
         document.getElementById('toggleOverlays').classList.add('active');
-
-        function toggleTranscriptPanel() {{
-            mainContent.classList.toggle('transcript-collapsed');
-            const collapsed = mainContent.classList.contains('transcript-collapsed');
-            subtitleToggleIcon.textContent = collapsed ? '←' : '→';
-        }}
 
         function toggleGalleryMenu(event) {{
             if (event) {{
@@ -2468,11 +2524,11 @@ class HTMLGenerator:
             galleryToolbar.style.display = galleryDetailType ? 'none' : 'flex';
             galleryViewport.classList.toggle('detail-view', !!galleryDetailType);
             if (galleryMode === 'timeline') {{
-                galleryViewChip.textContent = timelineSort === 'time' ? '时间排序' : '按分类排序';
+                galleryViewChip.textContent = '按时间排序';
                 renderTimelineGallery();
                 return;
             }}
-            galleryViewChip.textContent = galleryDetailType ? '详情模式' : '分类模式';
+            galleryViewChip.textContent = '按分类排序';
             if (!galleryDetailType) {{
                 renderCategoryHome();
                 return;
@@ -2539,30 +2595,21 @@ class HTMLGenerator:
 
         function renderTextualDetail(type) {{
             const entries = getEntriesByType(type);
-            const meta = getCategoryMeta(type);
             let itemsHtml = '';
             entries.forEach(item => {{
                 let cls = type === 'text' ? 'gallery-detail-item text-item' : 'gallery-detail-item';
                 if (item.idx === selectedDetailIdx) cls += ' active';
                 itemsHtml += '<div class="' + cls + '" onclick="focusDetailItem(\\'' + type + '\\',' + item.idx + ')">';
                 itemsHtml += '<div class="gallery-detail-time">' + formatTime(item.start) + '</div>';
-                itemsHtml += '<div class="gallery-detail-text">' + escapeHtml(item.title || item.summary || item.topic) + '</div>';
+                itemsHtml += '<div class="gallery-detail-title">' + escapeHtml(item.title || item.topic || getCategoryMeta(type).title) + '</div>';
+                itemsHtml += '<div class="gallery-detail-subtext">' + escapeHtml(item.summary || item.topic || '点击后跳转到对应视频位置') + '</div>';
                 itemsHtml += '</div>';
             }});
-            const firstStart = entries[0] ? entries[0].start : 0;
             let html = '';
             html += '<div class="gallery-detail-layout">';
             html += '<div class="gallery-side">';
-            html += '<div class="gallery-action-stack">';
             html += '<button class="gallery-back-btn" onclick="backToGalleryHome()">←</button>';
             html += '</div>';
-            html += '<div class="gallery-side-card ' + meta.sideClass + '">';
-            html += '<div class="gallery-category-icon">' + escapeHtml(meta.icon) + '</div>';
-            html += '<div class="gallery-category-copy">';
-            html += '<div class="gallery-category-title">' + escapeHtml(meta.title) + '</div>';
-            html += '<div class="gallery-category-desc">' + escapeHtml(meta.desc) + '</div>';
-            html += '</div>';
-            html += '</div></div>';
             html += '<div class="gallery-detail-list">' + itemsHtml + '</div>';
             html += '</div>';
             galleryViewport.innerHTML = html;
@@ -2578,53 +2625,43 @@ class HTMLGenerator:
                 backToGalleryHome();
                 return;
             }}
-            imageCarouselIndex = Math.max(0, Math.min(imageCarouselIndex, entries.length - 1));
-            const current = entries[imageCarouselIndex];
-            const imageHtml = current.svgPath
-                ? '<img src="' + escapeAttr(current.svgPath) + '" onclick="jumpTo(' + current.start + ')">'
-                : '<div class="concept-empty">暂无图片</div>';
             let html = '';
             html += '<div class="gallery-image-detail">';
             html += '<div class="gallery-side">';
-            html += '<div class="gallery-action-stack">';
             html += '<button class="gallery-back-btn" onclick="backToGalleryHome()">←</button>';
             html += '</div>';
-            html += '</div>';
             html += '<div class="gallery-image-main">';
-            html += '<div class="gallery-image-stage">';
-            html += '<button class="gallery-nav-btn prev-btn" onclick="stepImageCarousel(-1)">←</button>';
-            html += imageHtml;
-            html += '<button class="gallery-nav-btn next-btn" onclick="stepImageCarousel(1)">→</button>';
-            html += '</div>';
-            html += '<div class="gallery-image-caption"><strong>' + escapeHtml(current.title || '图片') + '</strong><br>' + escapeHtml(current.summary || current.topic || '点击图片可跳转到对应时间点。') + '</div>';
+            entries.forEach(item => {{
+                const imageHtml = item.svgPath
+                    ? '<img src="' + escapeAttr(item.svgPath) + '">'
+                    : '<div class="concept-empty">暂无图片</div>';
+                html += '<div class="gallery-image-card" onclick="jumpTo(' + item.start + ')">';
+                html += '<div class="gallery-image-stage">' + imageHtml + '</div>';
+                html += '<div class="gallery-image-caption"><strong>' + escapeHtml(item.title || '图片') + '</strong><br>' + escapeHtml(item.summary || item.topic || '点击图片可跳转到对应时间点。') + '</div>';
+                html += '</div>';
+            }});
             html += '</div></div>';
             galleryViewport.innerHTML = html;
         }}
 
-        function stepImageCarousel(offset) {{
-            const entries = getEntriesByType('image');
-            if (!entries.length) return;
-            imageCarouselIndex = (imageCarouselIndex + offset + entries.length) % entries.length;
-            renderImageDetail();
-        }}
-
         function renderTimelineGallery() {{
             let items = [...galleryEntries];
-            if (timelineSort === 'category') {{
-                const order = {{ mechanism: 0, text: 1, image: 2 }};
-                items.sort((a, b) => (order[a.category] - order[b.category]) || (a.start - b.start));
-            }} else {{
-                items.sort((a, b) => a.start - b.start);
-            }}
+            items.sort((a, b) => a.start - b.start);
             let cards = '';
             items.forEach(item => {{
                 cards += '<div class="timeline-card" onclick="openTimelineItem(\\'' + item.category + '\\',' + item.idx + ')">';
                 cards += '<div class="timeline-top">';
                 cards += '<div class="timeline-time">' + formatTime(item.start) + '</div>';
-                cards += '<div class="timeline-icon">' + escapeHtml(item.icon) + '</div>';
-                cards += '<div class="timeline-title">' + escapeHtml(item.displayType) + '</div>';
+                if (item.category === 'image' && item.svgPath) {{
+                    cards += '<div class="timeline-media"><img src="' + escapeAttr(item.svgPath) + '" alt=""></div>';
+                    cards += '<div class="timeline-bottom">' + escapeHtml(item.summary || item.title || item.topic) + '</div>';
+                }} else {{
+                    cards += '<div class="timeline-icon">' + escapeHtml(item.icon) + '</div>';
+                    cards += '<div class="timeline-production">' + escapeHtml(item.title || item.displayType || item.topic || 'production') + '</div>';
+                    cards += '<div class="timeline-summary-pill">' + escapeHtml(item.topic || item.displayType || '内容概览') + '</div>';
+                }}
                 cards += '</div>';
-                cards += '<div class="timeline-bottom">' + escapeHtml(item.summary || item.title || item.topic) + '</div>';
+                // 文字与机制链卡只保留两层信息：标题 + 一条摘要
                 cards += '</div>';
             }});
             galleryViewport.innerHTML = '<div class="gallery-mode-timeline">' + cards + '</div>';
@@ -2775,6 +2812,9 @@ class HTMLGenerator:
             collectGalleryEntries();
             const count = galleryEntries.length;
             galleryCount.textContent = count + ' 个增强点';
+            galleryMode = 'category';
+            galleryDetailType = null;
+            selectedDetailIdx = null;
             renderGallery();
         }}
 
@@ -2802,7 +2842,20 @@ class HTMLGenerator:
         }}
 
         // ========== Init ==========
-        updateGalleryCount();
+        ensureGalleryReady();
+        requestAnimationFrame(ensureGalleryReady);
+        setTimeout(ensureGalleryReady, 60);
+        setTimeout(ensureGalleryReady, 240);
+        window.addEventListener('load', ensureGalleryReady);
+        document.addEventListener('DOMContentLoaded', ensureGalleryReady);
+
+        const galleryObserver = new MutationObserver(function() {{
+            ensureGalleryReady();
+        }});
+        if (gallerySource) {{
+            galleryObserver.observe(gallerySource, {{ childList: true, subtree: true }});
+        }}
+
         document.addEventListener('click', function(e) {{
             if (!e.target.closest('.gallery-filter-wrap')) {{
                 closeGalleryMenu();
