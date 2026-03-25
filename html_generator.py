@@ -313,7 +313,7 @@ class HTMLGenerator:
         content_type = content.get('type', 'text')
 
         if content_type == 'svg':
-            style = self._get_svg_container_style(layout)
+            style = self._get_svg_container_style(layout, content)
         else:
             # 将绝对坐标转为百分比（相对于1920x1080画布）
             x = layout.get('x', 50)
@@ -364,17 +364,24 @@ class HTMLGenerator:
         """生成单个画廊源数据HTML，由前端JS统一渲染多种视图"""
         content = point.get('content', {})
         content_type = content.get('type', 'text')
+        point_content_type = point.get('content_type', '')
         timestamp = point.get('timestamp', 0)
         topic = (point.get('text', '') or '')[:120]
         svg_path = content.get('path', '')
         svg_mode_hint = point.get('svg_mode_hint', point.get('metadata', {}).get('svg_mode_hint', 'static_svg'))
 
-        if content_type == 'mechanism_chain':
+        if point_content_type == 'mechanism_chain':
             category = 'mechanism'
             display_type = '机制链'
-            title = content.get('chain_title', topic)[:60]
-            summary = " → ".join(str(stage) for stage in content.get('stages', [])[:3])[:160]
+            title = content.get('title', content.get('chain_title', topic))[:60]
+            summary = content.get('subtitle', " → ".join(str(stage) for stage in content.get('stages', [])[:3]))[:160]
             icon = '⚙'
+        elif point_content_type == 'text_card':
+            category = 'text'
+            display_type = '文字'
+            title = content.get('title', topic)[:60] or topic[:60]
+            summary = content.get('subtitle', point.get('text', ''))[:160]
+            icon = '文'
         elif content_type == 'svg':
             category = 'image'
             display_type = '图片'
@@ -442,12 +449,16 @@ class HTMLGenerator:
 
         if content_type == 'svg':
             svg_path = content.get('path', '')
+            svg_intent = content.get('svg_intent', '')
+            shell_class = 'svg-shell image-svg-shell'
+            if 'assets/t2svg/' in svg_path or svg_intent in ('knowledge_note', 'mechanism_process'):
+                shell_class = 'svg-shell text-svg-shell'
+            shell_style = self._build_overlay_shell_style(content)
 
-            # 视频浮层使用 object 标签加载，保留SVG内部CSS动画特性
             if svg_path:
                 return (
-                    f'<div class="svg-shell">'
-                    f'<object data="{svg_path}" type="image/svg+xml" class="svg-content" style="width: 100%; height: 100%; overflow: hidden; pointer-events: none;"></object>'
+                    f'<div class="{shell_class}" style="{shell_style}">'
+                    f'<img src="{svg_path}" class="svg-content svg-content-image" alt="SVG enhancement" draggable="false">'
                     f'</div>'
                 )
             else:
@@ -557,6 +568,39 @@ class HTMLGenerator:
 
         return '<div class="placeholder">Content</div>'
 
+    def _build_overlay_shell_style(self, content: Dict) -> str:
+        style = content.get('overlay_style') or {}
+        bg = html_module.escape(style.get('background', '#122238'))
+        border = html_module.escape(style.get('border', '#6d98d1'))
+        opacity = style.get('bg_opacity', 1.0)
+        svg_intent = content.get('svg_intent', '')
+        try:
+            opacity = max(0.88, min(1.0, float(opacity)))
+        except Exception:
+            opacity = 1.0
+        if svg_intent in ('knowledge_note', 'mechanism_process'):
+            opacity = 1.0
+        shell_bg = self._hex_to_rgba(bg, opacity)
+        return (
+            f'background: {shell_bg}; '
+            f'border: 4px solid {border}; '
+            f'border-radius: 18px; '
+            f'overflow: hidden; '
+            f'box-shadow: 0 16px 30px rgba(8, 15, 25, 0.22);'
+        )
+
+    def _hex_to_rgba(self, color: str, alpha: float) -> str:
+        raw = str(color or '').strip().lstrip('#')
+        if len(raw) != 6:
+            return f'rgba(18, 34, 56, {alpha})'
+        try:
+            r = int(raw[0:2], 16)
+            g = int(raw[2:4], 16)
+            b = int(raw[4:6], 16)
+            return f'rgba({r}, {g}, {b}, {alpha})'
+        except Exception:
+            return f'rgba(18, 34, 56, {alpha})'
+
     def _generate_concept_graph_html(self, concept_graph: Dict) -> str:
         def _clean_md(text: str, fallback: str) -> str:
             raw = str(text or fallback).strip()
@@ -621,7 +665,7 @@ class HTMLGenerator:
     # Private: SVG容器样式
     # ================================================================
 
-    def _get_svg_container_style(self, layout: Dict) -> str:
+    def _get_svg_container_style(self, layout: Dict, content: Dict | None = None) -> str:
         """计算SVG容器样式
         
         使用 layout_agent 给出的 (x, y, w, h) 像素值，
@@ -638,6 +682,28 @@ class HTMLGenerator:
             top_pct = y / self.LAYOUT_CANVAS_H * 100
             w_pct = w / self.LAYOUT_CANVAS_W * 100
             h_pct = h / self.LAYOUT_CANVAS_H * 100
+            svg_path = (content or {}).get('path', '')
+            svg_intent = (content or {}).get('svg_intent', '')
+            is_t2svg = 'assets/t2svg/' in svg_path or svg_intent in ('knowledge_note', 'mechanism_process')
+            if is_t2svg:
+                original_w_pct = w_pct
+                original_h_pct = h_pct
+                w_pct *= 1.30
+                h_pct *= 1.30
+                left_pct -= (w_pct - original_w_pct) / 2
+                top_pct -= (h_pct - original_h_pct) / 2
+            min_w_pct = 18.0 if is_t2svg else 14.0
+            min_h_pct = 15.0 if is_t2svg else 10.5
+            w_pct = max(w_pct, min_w_pct)
+            h_pct = max(h_pct, min_h_pct)
+            margin_x = 4.8
+            margin_y = 5.2
+            left_pct = max(margin_x, left_pct)
+            top_pct = max(margin_y, top_pct)
+            if left_pct + w_pct > 100 - margin_x:
+                left_pct = max(margin_x, 100 - margin_x - w_pct)
+            if top_pct + h_pct > 100 - margin_y:
+                top_pct = max(margin_y, 100 - margin_y - h_pct)
             return f'left: {left_pct:.2f}%; top: {top_pct:.2f}%; width: {w_pct:.2f}%; height: {h_pct:.2f}%;'
         
         # 回退：使用位置名称
@@ -650,6 +716,10 @@ class HTMLGenerator:
             return 'left: 2%; bottom: 2%; width: 55%; height: 55%;'
         elif position == 'bottom-right':
             return 'right: 2%; bottom: 2%; width: 55%; height: 55%;'
+        elif position == 'middle-left':
+            return 'left: 4.5%; top: 18%; width: 46%; height: 54%;'
+        elif position == 'middle-right':
+            return 'right: 4.5%; top: 18%; width: 46%; height: 54%;'
         elif position in ('full', 'center'):
             return 'left: 5%; top: 5%; width: 90%; height: 90%;'
         else:
@@ -965,9 +1035,9 @@ class HTMLGenerator:
             display: flex;
             align-items: center;
             justify-content: center;
-            /* In-Video Cinematic Effect: blend with background */
-            mix-blend-mode: screen; 
-            filter: drop-shadow(0 0 20px rgba(0,0,0,0.5));
+            mix-blend-mode: normal;
+            filter: drop-shadow(0 14px 28px rgba(15, 23, 42, 0.28));
+            isolation: isolate;
         }
 
         .mechanism-overlay,
@@ -996,16 +1066,51 @@ class HTMLGenerator:
             width: 100%;
             height: 100%;
             object-fit: contain;
+            display: block;
+            background: inherit;
+            border: none;
+            outline: none;
+        }
+
+        .svg-content-image {
+            filter: drop-shadow(0 10px 22px rgba(15, 23, 42, 0.18));
+            transform: translateZ(0);
+            backface-visibility: hidden;
         }
 
         .svg-shell {
             width: 100%;
             height: 100%;
-            background: rgba(255, 255, 255, 0.88);
-            border: 1px solid rgba(151, 184, 219, 0.42);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.72), 0 14px 32px rgba(47,111,178,0.14);
-            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 18px;
             overflow: hidden;
+        }
+
+        .text-svg-shell {
+            width: 100%;
+            height: 100%;
+            padding: 0;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            box-shadow: 0 18px 32px rgba(8, 15, 25, 0.24);
+        }
+
+        .text-svg-shell .svg-content {
+            object-fit: fill;
+            background: inherit;
+        }
+
+        .text-svg-shell .svg-content-image {
+            filter: none;
+        }
+
+        .image-svg-shell {
+            padding: 0;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
         }
 
         /* Scholarly Overlay Theme */
@@ -1788,8 +1893,8 @@ class HTMLGenerator:
         }
 
         .gallery-image-card {
-            background: linear-gradient(180deg, #ffffff 0%, #f3f8fe 100%);
-            border: 1px solid var(--border);
+            background: linear-gradient(180deg, rgba(233, 243, 252, 0.72) 0%, rgba(241, 248, 254, 0.42) 100%);
+            border: 1px solid rgba(182, 208, 233, 0.56);
             border-radius: 22px;
             overflow: hidden;
             display: flex;
@@ -1797,19 +1902,20 @@ class HTMLGenerator:
             gap: 0;
             cursor: pointer;
             min-height: 280px;
-            box-shadow: 0 10px 24px rgba(47,111,178,0.08);
+            box-shadow: 0 8px 20px rgba(47,111,178,0.06);
+            backdrop-filter: blur(6px);
         }
 
         .gallery-image-stage {
             position: relative;
-            background: #edf5fd;
-            border-bottom: 1px solid var(--border);
+            background: transparent;
+            border-bottom: none;
             min-height: 220px;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
-            padding: 14px 18px;
+            padding: 12px 12px 0;
         }
 
         .gallery-back-btn {
@@ -1824,16 +1930,17 @@ class HTMLGenerator:
             max-width: none;
             max-height: none;
             object-fit: contain;
-            border-radius: 14px;
-            box-shadow: 0 12px 28px rgba(47,111,178,0.14);
+            border-radius: 0;
+            box-shadow: none;
+            background: transparent;
         }
 
         .gallery-image-caption {
-            background: #ffffff;
-            padding: 12px 14px 14px;
-            color: var(--text-secondary);
+            background: transparent;
+            padding: 10px 14px 14px;
+            color: var(--text-primary);
             font-size: 13px;
-            line-height: 1.65;
+            line-height: 1.6;
             display: flex;
             flex-direction: column;
             justify-content: flex-start;
@@ -1867,6 +1974,12 @@ class HTMLGenerator:
             min-height: 124px;
             padding: 12px;
             gap: 10px;
+        }
+
+        .timeline-card.image-card {
+            background: linear-gradient(180deg, rgba(233, 243, 252, 0.72) 0%, rgba(241, 248, 254, 0.42) 100%);
+            border-color: rgba(182, 208, 233, 0.56);
+            box-shadow: 0 8px 20px rgba(47,111,178,0.05);
         }
 
         .timeline-card:hover {
@@ -1919,12 +2032,12 @@ class HTMLGenerator:
             max-height: 120px;
             border-radius: 14px;
             overflow: hidden;
-            background: #eef5fd;
-            border: 1px solid #d8e7f5;
+            background: transparent;
+            border: none;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: inset 0 0 0 1px rgba(108, 152, 209, 0.05);
+            box-shadow: none;
         }
 
         .timeline-media img {

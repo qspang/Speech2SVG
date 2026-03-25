@@ -152,6 +152,7 @@ class VisualStrategy:
         # ── 5. Inject hard color values ────────────────────────────
         brief["color_instructions"] = {
             "background": bg_color,
+            "border": design_guide.get("recommended_border", accent_color),
             "primary_accent": accent_color,
             "secondary_accent": secondary_color,
             "text": text_color,

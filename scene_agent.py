@@ -20,14 +20,20 @@ class SceneAgent:
         video_path: str,
         output_dir: str,
         llm_type: str = "claude-sonnet-4-5-20250929",
-        max_workers: int = 1
+        max_workers: int = 1,
+        enable_print_scene: bool = False,
     ):
         """初始化"""
         self.video_path = video_path
         self.output_dir = output_dir
         self.llm_type = llm_type
         self.max_workers = max(1, max_workers)
+        self.enable_print_scene = enable_print_scene
         self.scene_cache_path = os.path.join(output_dir, "scene_analysis.txt")
+
+    def _debug(self, message: str):
+        if self.enable_print_scene:
+            print(message)
     
     def analyze_scenes(
         self,
@@ -160,6 +166,27 @@ class SceneAgent:
             print(f"      [SceneAgent] Colors: bg={color_hierarchy.get('background_color','?')} "
                   f"accent={color_hierarchy.get('accent_color','?')} "
                   f"complexity={visual_complexity} sat={color_metrics.get('saturation_level','?')}")
+            if self.enable_print_scene:
+                self._debug(
+                    "      [Scene/debug] "
+                    f"palette={color_hierarchy.get('all_colors', [])[:5]} "
+                    f"weights={color_hierarchy.get('color_weights', [])[:5]}"
+                )
+                self._debug(
+                    "      [Scene/metrics] "
+                    f"brightness={color_metrics.get('brightness'):.1f}({color_metrics.get('brightness_level')}) "
+                    f"saturation={color_metrics.get('saturation'):.3f}({color_metrics.get('saturation_level')}) "
+                    f"temperature={color_metrics.get('temperature')}"
+                )
+                if region_context:
+                    self._debug(
+                        "      [Scene/region] "
+                        f"bg={region_context.get('region_bg_color')} "
+                        f"brightness={region_context.get('region_brightness')} "
+                        f"type={region_context.get('region_type')} "
+                        f"colors={region_context.get('region_colors', [])[:4]} "
+                        f"opacity_hint={region_context.get('recommended_svg_opacity')}"
+                    )
             
             # 5. 生成设计指南（给SVG和Text用）— 含局部区域上下文
             design_guide = self._generate_design_guide(
@@ -448,39 +475,53 @@ class SceneAgent:
             temp = color_metrics['temperature']
             
             system_prompt = """You are a High-End Visual Design Director.
-            
-Your task: Analyze the visual technical parameters and prescribe a distinct, cohesive ART STYLE for motion graphics that overlays this footage.
-The target tone is scholarly, legible, and publication-friendly rather than flashy product marketing.
+
+Your task: analyze the scene and prescribe a distinct, cohesive visual language for motion graphics that overlays this footage.
+The target tone is legible, publication-friendly, and visually harmonious with the video rather than locked to any one aesthetic family.
+
+**DO NOT DEFAULT TO A DARK SCI-FI HUD.**
+Only choose a technical/HUD-like style if the frame truly supports it. In many cases, a calmer editorial, diagrammatic, cinematic, or field-note style will fit better.
+
+**PRIMARY GOAL: HARMONY + LEGIBILITY**
+The overlay should feel like it belongs in this frame. Prefer styles and colors that:
+- harmonize with the local overlay region
+- preserve readability
+- create enough contrast without feeling pasted on
+
+**COLOR STRATEGY**
+When choosing colors, explicitly reason using one of these ideas:
+- analogous harmony
+- complementary contrast
+- split-complementary balance
+- neutral contrast
+- warm/cool temperature rebalance
+
+Use the local region color, brightness, saturation, and temperature to decide which strategy fits best.
 
 **AVOID GENERIC TERMS.** Do not just say "modern" or "clean".
-Prefer styles that could plausibly appear in a research demo, conference talk, or technical explainer.
+Prefer styles that could plausibly appear in a research demo, conference talk, technical explainer, editorial explainer, or cinematic annotation system.
 
 Output JSON:
 {
-  "art_style_name": "Name of the style (e.g., 'Cyberpunk Glitch', 'Swiss Minimalist', 'Organic Flow')",
-  "visual_metaphor": "A core visual concept (e.g., 'Floating data particles', 'Architectural blueprints', 'Liquid gradients')",
-  "svg_prompt": "Specific instruction for the SVG artist (shapes, stroke styles, effects)",
+  "art_style_name": "A concise style name that reflects the actual scene fit",
+  "visual_metaphor": "A core visual concept grounded in the frame",
+  "svg_prompt": "Specific instruction for the SVG artist (layout, stroke style, texture, contrast, motion mood)",
   "text_style": "Specific CSS/design instruction for text overlays",
   "recommended_bg": "#hex — MUST harmonize with the overlay region's local background",
-  "recommended_accent": "#hex (The most striking color to use)",
-  "recommended_secondary": "#hex (Complementary)",
+  "recommended_accent": "#hex (most useful accent)",
+  "recommended_secondary": "#hex (supporting accent)",
+  "recommended_text": "#hex (text color chosen for readability)",
   "svg_bg_opacity": 0.0-1.0
 }
 
-**STYLE LOGIC:**
-1. **High Tech/Dark**: Prefer 'Scientific Instrument Panel' or 'Scholarly HUD'. Precise lines, controlled glow, restrained highlights.
-2. **Nature/Bright**: Prefer 'Field Notes Minimal' or 'Editorial Diagram'. Soft contrast, clear shapes, understated depth.
-3. **Corporate/Clean**: Prefer 'Swiss Editorial' or 'Research Poster'. Grid-based, heavy bold text, solid colors, high legibility.
-4. **Chaotic/Action**: Prefer 'Controlled Signal Distortion'. Still readable, structured, and not overly noisy.
-
-**CRITICAL — OVERLAY REGION BLENDING:**
-The SVG overlay will be placed on a specific region of the video frame. You MUST ensure the SVG background blends seamlessly:
-- If the region is DARK → use a dark or transparent SVG background, with light/neon accents
-- If the region is BRIGHT → use a light or transparent SVG background, with dark/bold accents
-- If the region is SOLID color → SVG can use transparent background (the video color shows through)
-- If the region is COMPLEX (busy content) → SVG needs a semi-opaque backdrop for readability
-- The `recommended_bg` MUST be close to or harmonize with the region's actual background color
-- NEVER use a white SVG background on a dark region or vice versa
+**CRITICAL — OVERLAY REGION BLENDING**
+The SVG overlay will be placed on a specific region of the video frame. You MUST ensure the overlay background blends intelligently:
+- If the region is DARK: do not automatically choose neon/HUD; choose a dark or low-luminance background that remains readable and harmonious
+- If the region is BRIGHT: choose a light or mid-light background with sufficient text contrast
+- If the region is SOLID: the overlay may stay close to that hue family, but still keep a visible boundary
+- If the region is COMPLEX: use a more stable semi-opaque background for readability
+- `recommended_bg` should be near, complementary to, or temperature-balanced against the actual region background
+- the palette should feel integrated, not aggressively stylized unless the footage strongly supports it
 """
             
             # 构建局部区域信息
@@ -519,7 +560,9 @@ The SVG overlay will be placed on a specific region of the video frame. You MUST
 {region_info}
 
 Generate specific, actionable design instructions for SVG and text.
+Prioritize fit to the actual frame over repeating one familiar style family.
 The `recommended_bg` and `svg_bg_opacity` MUST account for the overlay region info above.
+The output should be harmonious, legible, and visually integrated with the local frame.
 
 Return JSON only."""
             
@@ -540,8 +583,25 @@ Return JSON only."""
             result_text = result_text.replace('```json', '').replace('```', '').strip()
             
             design_guide = json.loads(result_text)
-            
-            return self._stabilize_design_guide(design_guide, region_context, color_hierarchy)
+            if self.enable_print_scene:
+                self._debug(f"      [Scene/llm_raw] {design_guide}")
+
+            stabilized = self._stabilize_design_guide(design_guide, region_context, color_hierarchy)
+            if self.enable_print_scene:
+                self._debug(
+                    "      [Scene/design_guide] "
+                    f"style={stabilized.get('art_style_name')} "
+                    f"bg={stabilized.get('recommended_bg')} "
+                    f"accent={stabilized.get('recommended_accent')} "
+                    f"secondary={stabilized.get('recommended_secondary')} "
+                    f"text={stabilized.get('recommended_text')} "
+                    f"opacity={stabilized.get('svg_bg_opacity')} "
+                    f"metaphor={stabilized.get('visual_metaphor')}"
+                )
+                self._debug(f"      [Scene/svg_prompt] {stabilized.get('svg_prompt')}")
+                self._debug(f"      [Scene/text_style] {stabilized.get('text_style')}")
+
+            return stabilized
             
         except Exception as e:
             print(f"      LLM design guide generation failed: {e}, using fallback")
@@ -604,8 +664,8 @@ Return JSON only."""
             'recommended_text': text_color,
             'recommended_secondary': color_hierarchy['all_colors'][1] if len(color_hierarchy.get('all_colors', [])) > 1 else accent,
             'svg_bg_opacity': 0.82 if visual_complexity != 'complex' else 0.9,
-            'art_style_name': 'Scholarly Contrast Overlay',
-            'visual_metaphor': 'Layered explanatory plate',
+            'art_style_name': 'Contextual Explanatory Overlay',
+            'visual_metaphor': 'Integrated annotation plate',
         }
 
     def _stabilize_design_guide(self, design_guide: Dict, region_context: Dict, color_hierarchy: Dict) -> Dict:
@@ -627,8 +687,8 @@ Return JSON only."""
             opacity = 0.82
         opacity = max(0.78, min(0.94, opacity))
 
-        text_style = design_guide.get('text_style', 'High-contrast scholarly panel')
-        svg_prompt = design_guide.get('svg_prompt', 'Use structured geometry, strong contrast, and restrained motion.')
+        text_style = design_guide.get('text_style', 'Context-aware explanatory panel with strong local contrast')
+        svg_prompt = design_guide.get('svg_prompt', 'Use structured shapes, readable hierarchy, and motion that fits the scene rather than a fixed HUD aesthetic.')
 
         design_guide['recommended_bg'] = bg
         design_guide['recommended_accent'] = accent
@@ -638,7 +698,7 @@ Return JSON only."""
         design_guide['text_style'] = text_style
         design_guide['svg_prompt'] = svg_prompt
         if not design_guide.get('art_style_name'):
-            design_guide['art_style_name'] = 'Scholarly Contrast Overlay'
+            design_guide['art_style_name'] = 'Contextual Explanatory Overlay'
         if not design_guide.get('visual_metaphor'):
-            design_guide['visual_metaphor'] = 'Layered explanatory plate'
+            design_guide['visual_metaphor'] = 'Integrated annotation plate'
         return design_guide

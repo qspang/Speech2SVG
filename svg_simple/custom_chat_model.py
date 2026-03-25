@@ -69,6 +69,13 @@ class CustomChatModel(BaseChatModel):
                 timeout=DEFAULT_TIMEOUT
             )
             self.streaming = True
+        elif llm_type == "gpt-5.4":
+            self.client = OpenAI(
+                api_key=os.getenv("CL_API_KET"),
+                base_url=" https://gpt-agent.cc/v1",
+                timeout=DEFAULT_TIMEOUT
+            )
+            self.streaming = True
         # elif llm_type == "kimi-k2.5":
         #     self.client = OpenAI(
         #         api_key=os.getenv("PLAN_API_KEY"),
@@ -280,6 +287,14 @@ class CustomChatModel(BaseChatModel):
             else:
                 return self._stream_response(self.llm_type, input_messages)
 
+        elif self.llm_type == "gpt-5.4":
+            response = self.client.chat.completions.create(
+                model=self.llm_type,
+                messages=input_messages,
+                top_p=self.top_p,
+                max_tokens=self.claude_max_tokens
+            )
+            return response.choices[0].message.content
         elif self.llm_type == "glm-5":
             response = self.client.chat.completions.create(
                 model=self.llm_type,
@@ -288,7 +303,6 @@ class CustomChatModel(BaseChatModel):
                 max_tokens=self.claude_max_tokens
             )
             return response.choices[0].message.content
-        
         elif self.llm_type == "qwen3.5-plus":
             response = self.client.chat.completions.create(
                 model=self.llm_type,
@@ -572,6 +586,7 @@ class CustomChatModel(BaseChatModel):
             "qwen-vl-plus",
             "qwen-vl-max",
             "claude-sonnet-4-5-20250929",
+            "qwen3.5-plus","kimi-k2.5","gpt-5.4",
              "gemini-3.1-pro-high", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-5.3-codex", "gemini-3.1-pro-low"
         ]
         return any(vm in self.llm_type.lower() for vm in vision_models)

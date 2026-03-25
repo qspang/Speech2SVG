@@ -66,3 +66,46 @@ git checkout de353af
 
 - `backup/gallery-bottom-rightpanel-20260320` 是“左下增强内容画廊、右侧字幕和全局概念图”这个布局版本的稳定存档点。
 - 接下来如果继续开发新的布局，建议都以这个分支/提交作为回退基准。
+
+---
+
+## 4. 左中右结构版本存档记录
+
+下面这条记录对应当前已经完成的界面状态：
+
+- 左侧：上方视频、下方字幕
+- 中间：增强内容画廊
+- 右侧：全局概念图
+- 即当前的“左中右结构”版本
+
+具体存档信息如下：
+
+- 备份分支：`backup/left-middle-right-layout-20260321`
+- 提交号（short hash）：`5d19644`
+- 提交说明：`backup: left middle right layout`
+
+如果你之后想回到这个版本，可以在终端运行：
+
+```bash
+cd /home/ubuntu/sysu/svgagent/video_enhance/video_sys
+
+# 切换到左中右结构的备份分支
+git switch backup/left-middle-right-layout-20260321
+
+# 或者直接切到这个提交
+git checkout 5d19644
+```
+
+如果你当前在别的开发分支上，想先保存当前工作再切回这个版本，可以先运行：
+
+```bash
+git status
+git add -A
+git commit -m "wip: save current work before restore"
+git switch backup/left-middle-right-layout-20260321
+```
+
+说明：
+
+- `backup/left-middle-right-layout-20260321` 是“左中右结构”这一版界面的稳定存档点。
+- 接下来如果要在此基础上继续探索新布局，建议优先从这个分支出发。

@@ -70,6 +70,7 @@ class SVGGenerator:
         bg = colors.get("background", "#0d1117")
         primary = colors.get("primary_accent", "#58a6ff")
         secondary = colors.get("secondary_accent", "#64ffda")
+        border_c = colors.get("border", primary)
         text_c = colors.get("text", "#e6edf3")
         bg_opacity = colors.get("bg_opacity", 0.92)
         svg_mode = brief.get("svg_mode", "static")
@@ -84,6 +85,7 @@ Palette from video frame — MUST USE:
 - background: {bg} (opacity hint {bg_opacity})
 - primary: {primary}
 - secondary: {secondary}
+- border: {border_c}
 - text: {text_c}
 
 Core rules:
@@ -97,7 +99,8 @@ Core rules:
 6. Do not output simplistic box-and-arrow filler unless the concept truly requires it.
 
 Technical safety:
-- Transparent overlay only. Do not draw a full solid background rect.
+- Draw a harmonized background plate behind the SVG. It must not be transparent.
+- Draw a visible border using the provided border color so the overlay edge reads clearly against the video.
 - Use large readable text suitable for video overlay.
 - Avoid CSS translate keyframes that break SVG positioning.
 - Prefer opacity, scale, stroke-dashoffset, rotate, cx/cy/x/y, and SVG-native animation.

@@ -25,6 +25,8 @@ class VideoEnhancer:
         max_workers: int = 1,
         layout_max_workers: int = 1,
         scene_max_workers: int = 1,
+        enable_print_layout: bool = False,
+        enable_print_scene: bool = False,
         enable_misconception: bool = False,
         enable_mechanism_chain: bool = False,
         enable_concept_graph: bool = False,
@@ -48,6 +50,8 @@ class VideoEnhancer:
         self.max_workers = max(1, max_workers)
         self.layout_max_workers = max(1, layout_max_workers)
         self.scene_max_workers = max(1, scene_max_workers)
+        self.enable_print_layout = enable_print_layout
+        self.enable_print_scene = enable_print_scene
         self.enable_misconception = enable_misconception
         self.enable_mechanism_chain = enable_mechanism_chain
         self.enable_concept_graph = enable_concept_graph
@@ -69,6 +73,8 @@ class VideoEnhancer:
         print(f"  Max Workers: {self.max_workers}")
         print(f"  Layout Workers: {self.layout_max_workers}")
         print(f"  Scene Workers: {self.scene_max_workers}")
+        print(f"  Print Layout Debug: {self.enable_print_layout}")
+        print(f"  Print Scene Debug: {self.enable_print_scene}")
     
     def process(self, force_reprocess: bool = False) -> str:
         """
@@ -100,6 +106,8 @@ class VideoEnhancer:
             max_workers=self.max_workers,
             layout_max_workers=self.layout_max_workers,
             scene_max_workers=self.scene_max_workers,
+            enable_print_layout=self.enable_print_layout,
+            enable_print_scene=self.enable_print_scene,
             enable_misconception=self.enable_misconception,
             enable_mechanism_chain=self.enable_mechanism_chain,
             enable_concept_graph=self.enable_concept_graph,
@@ -179,6 +187,10 @@ def main():
                         help='Max concurrent workers for layout analysis')
     parser.add_argument('--scene-max-workers', type=int, default=1, dest='scene_max_workers',
                         help='Max concurrent workers for scene analysis')
+    parser.add_argument('--enable-print-layout', action='store_true',
+                        help='Print detailed layout / VLLM placement debug logs')
+    parser.add_argument('--enable-print-scene', action='store_true',
+                        help='Print detailed scene / LLM design-guide debug logs')
     parser.add_argument('--enable-misconception', action='store_true',
                         help='Enable misconception correction cards')
     parser.add_argument('--enable-mechanism-chain', action='store_true',
@@ -204,6 +216,8 @@ def main():
         max_workers=args.max_workers,
         layout_max_workers=args.layout_max_workers,
         scene_max_workers=args.scene_max_workers,
+        enable_print_layout=args.enable_print_layout,
+        enable_print_scene=args.enable_print_scene,
         enable_misconception=args.enable_misconception,
         enable_mechanism_chain=args.enable_mechanism_chain,
         enable_concept_graph=args.enable_concept_graph,

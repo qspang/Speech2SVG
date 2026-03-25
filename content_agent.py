@@ -12,6 +12,8 @@ import json
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from text_agent import TextAgent
+from text_to_svg_agent import TextToSVGAgent
+from overlay_style_agent import OverlayStyleAgent
 
 # 统一画布常量
 CANVAS_WIDTH = 1920
@@ -32,12 +34,16 @@ class ContentAgent:
         
         # 初始化TextAgent
         self.text_agent = TextAgent(llm_type)
+        self.text_to_svg_agent = TextToSVGAgent(llm_type)
+        self.overlay_style_agent = OverlayStyleAgent(llm_type)
         
         # 创建assets目录
         self.assets_dir = os.path.join(output_dir, "assets")
         self.svg_dir = os.path.join(self.assets_dir, "svg")
+        self.t2svg_dir = os.path.join(self.assets_dir, "t2svg")
         self.text_cache_dir = os.path.join(self.assets_dir, "text")
         os.makedirs(self.svg_dir, exist_ok=True)
+        os.makedirs(self.t2svg_dir, exist_ok=True)
         os.makedirs(self.text_cache_dir, exist_ok=True)
     
     def generate_content(
@@ -152,7 +158,7 @@ class ContentAgent:
         elif point['content_type'] == 'text_card':
             content = self._generate_text_content(point, idx)
             point['content'] = content
-            print(f"    [{idx+1}] Text: {content.get('hero_text', 'No Text')}")
+            print(f"    [{idx+1}] Text→SVG: {content.get('title', point.get('text', 'No Text')[:40])}")
         elif point['content_type'] == 'misconception_card':
             content = self._generate_misconception_content(point, idx)
             point['content'] = content
@@ -160,13 +166,36 @@ class ContentAgent:
         elif point['content_type'] == 'mechanism_chain':
             content = self._generate_mechanism_chain_content(point, idx)
             point['content'] = content
-            print(f"    [{idx+1}] Mechanism: {content.get('chain_title', 'No Title')}")
+            print(f"    [{idx+1}] Mechanism→SVG: {content.get('title', point.get('text', 'No Title')[:40])}")
     
+    def _build_styled_scene_info(self, point: Dict, content_kind: str) -> Dict:
+        """为每个 overlay 单独规划背景/边框/文字颜色。"""
+        import copy
+
+        base_scene = copy.deepcopy(point.get('scene_info', {}) or {})
+        layout_info = point.get('layout', {}) or {}
+        style_plan = self.overlay_style_agent.plan_style(
+            transcript=point.get('text', ''),
+            scene_info=base_scene,
+            layout_info=layout_info,
+            content_kind=content_kind,
+        )
+        base_scene['overlay_style'] = style_plan
+        design = dict(base_scene.get('design_guide', {}) or {})
+        design['recommended_bg'] = style_plan.get('background', design.get('recommended_bg', '#122238'))
+        design['recommended_border'] = style_plan.get('border', design.get('recommended_border', design.get('recommended_accent', '#7aa7d8')))
+        design['recommended_accent'] = style_plan.get('primary_accent', design.get('recommended_accent', '#7aa7d8'))
+        design['recommended_secondary'] = style_plan.get('secondary_accent', design.get('recommended_secondary', design.get('recommended_accent', '#7aa7d8')) )
+        design['recommended_text'] = style_plan.get('text', design.get('recommended_text', '#f8fbff'))
+        design['svg_bg_opacity'] = style_plan.get('bg_opacity', design.get('svg_bg_opacity', 0.84))
+        base_scene['design_guide'] = design
+        return base_scene
+
     def _generate_svg_content(self, point: Dict, idx: int) -> Dict:
         """生成SVG内容"""
         topic = point['text']
         timestamp = point['timestamp']
-        scene_info = point.get('scene_info', {})
+        scene_info = self._build_styled_scene_info(point, 'svg')
         layout_info = point.get('layout', {})
         motion_context = {
             'svg_mode_hint': point.get('svg_mode_hint', point.get('metadata', {}).get('svg_mode_hint', 'none')),
@@ -213,7 +242,8 @@ class ContentAgent:
                     return {
                         'type': 'svg',
                         'path': f'temp_analysis/assets/svg/{filename}',
-                        'svg_content': svg_content
+                        'svg_content': svg_content,
+                        'overlay_style': scene_info.get('overlay_style', {}),
                     }
                 except Exception as e:
                     print(f"      [Cache] Read failed: {e}, falling back to generation.")
@@ -250,7 +280,8 @@ class ContentAgent:
                 return {
                     'type': 'svg',
                     'path': f'temp_analysis/assets/svg/{filename}',
-                    'svg_content': svg_content
+                    'svg_content': svg_content,
+                    'overlay_style': scene_info.get('overlay_style', {}),
                 }
             
         except Exception as e:
@@ -283,6 +314,8 @@ class ContentAgent:
         design = scene_info.get('design_guide', {})
         bg = design.get('recommended_bg', '#0a0a1a')
         accent = design.get('recommended_accent', '#00f3ff')
+        border = design.get('recommended_border', accent)
+        bg_opacity = design.get('svg_bg_opacity', 0.86)
         
         safe_topic = topic[:30] if topic else "Info"
         cx = width // 2
@@ -296,7 +329,7 @@ class ContentAgent:
     .fade {{ animation: fadeIn 1s ease-out forwards; }}
   </style>
   
-  <rect width="{width}" height="{height}" fill="{bg}"/>
+  <rect width="{width}" height="{height}" rx="28" fill="{bg}" fill-opacity="{bg_opacity}" stroke="{border}" stroke-width="3"/>
   
   <text x="{cx}" y="{cy - 50}" font-family="sans-serif" font-size="32" 
         fill="{accent}" text-anchor="middle" class="fade">
@@ -318,26 +351,13 @@ class ContentAgent:
         return {
             'type': 'svg',
             'path': f'temp_analysis/assets/svg/{filename}',
-            'svg_content': svg
+            'svg_content': svg,
+            'overlay_style': scene_info.get('overlay_style', {}),
         }
     
     def _generate_text_content(self, point: Dict, idx: int) -> Dict:
-        """生成文字内容"""
-        cache_name = f"text_{idx}_{int(point['timestamp'])}.txt"
-        cached = self._load_cached_text_content(cache_name, "text_card")
-        if cached:
-            return cached
-
-        transcript = point['text']
-        duration = point.get('duration', 3.0)
-        scene_info = point.get('scene_info', {})
-        layout_info = point.get('layout', {})
-        
-        text_card = self.text_agent.generate_knowledge_card(
-            transcript, scene_info, duration, layout_info
-        )
-        self._save_text_content(cache_name, text_card)
-        return text_card
+        """生成文字内容（专用 text->SVG 链）"""
+        return self._generate_t2svg_content(point, idx, mode="text")
 
     def _generate_misconception_content(self, point: Dict, idx: int) -> Dict:
         cache_name = f"misconception_{idx}_{int(point['timestamp'])}.txt"
@@ -356,20 +376,160 @@ class ContentAgent:
         return content
 
     def _generate_mechanism_chain_content(self, point: Dict, idx: int) -> Dict:
-        cache_name = f"mechanism_{idx}_{int(point['timestamp'])}.txt"
-        cached = self._load_cached_text_content(cache_name, "mechanism_chain")
-        if cached:
-            return cached
+        """生成机制链内容（专用 text->SVG 链）"""
+        return self._generate_t2svg_content(point, idx, mode="mechanism")
 
-        payload = point.get('metadata', {}).get('mechanism_payload') or point.get('mechanism_payload') or {}
-        content = self.text_agent.generate_mechanism_chain_card(
-            point['text'],
-            point.get('scene_info', {}),
-            payload,
-            point.get('layout', {})
+
+    def _generate_t2svg_content(self, point: Dict, idx: int, mode: str) -> Dict:
+        """
+        文字 / 机制链统一走独立的 text-to-SVG 生成链。
+        成功时缓存到 assets/t2svg，后续直接读取并 append 到 HTML。
+        """
+        timestamp = point['timestamp']
+        prefix = 'mechanism' if mode == 'mechanism' else 'text'
+        version_tag = "v4"
+        filename = f"{prefix}_{version_tag}_{idx}_{int(timestamp)}.svg"
+        filepath = os.path.join(self.t2svg_dir, filename)
+
+        if os.path.exists(filepath):
+            print(f"      [Cache] Found existing t2svg {filename}, skipping generation.")
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    svg_content = f.read()
+                legacy_markers = ("INSIGHT", "OBSERVATION", "NOTE")
+                if any(marker in svg_content for marker in legacy_markers):
+                    print(f"      [Cache] Legacy t2svg detected in {filename}, regenerating.")
+                    raise ValueError("legacy_t2svg_cache")
+                return {
+                    'type': 'svg',
+                    'path': f'temp_analysis/assets/t2svg/{filename}',
+                    'svg_content': svg_content,
+                    'title': point.get('text', '')[:72],
+                    'subtitle': point.get('text', '')[:120],
+                    'svg_intent': 'mechanism_process' if mode == 'mechanism' else 'knowledge_note',
+                    'overlay_style': self._build_styled_scene_info(point, 't2svg_mechanism' if mode == 'mechanism' else 't2svg_text').get('overlay_style', {}),
+                }
+            except Exception as e:
+                print(f"      [Cache] Failed to load t2svg {filename}: {e}, regenerating.")
+
+        payload = {}
+        if mode == 'mechanism':
+            payload = point.get('metadata', {}).get('mechanism_payload') or point.get('mechanism_payload') or {}
+
+        styled_scene_info = self._build_styled_scene_info(point, 't2svg_mechanism' if mode == 'mechanism' else 't2svg_text')
+
+        result = self.text_to_svg_agent.generate_text_svg(
+            transcript=point['text'],
+            scene_info=styled_scene_info,
+            layout_info=point.get('layout', {}),
+            mode=mode,
+            payload=payload,
         )
-        self._save_text_content(cache_name, content)
-        return content
+
+        svg_content = result.get('svg_content', '').strip()
+        if svg_content:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+            return {
+                'type': 'svg',
+                'path': f'temp_analysis/assets/t2svg/{filename}',
+                'svg_content': svg_content,
+                'title': result.get('title', point.get('text', '')[:72]),
+                'subtitle': result.get('subtitle', point.get('text', '')[:120]),
+                'svg_intent': 'mechanism_process' if mode == 'mechanism' else 'knowledge_note',
+                'overlay_style': styled_scene_info.get('overlay_style', {}),
+            }
+
+        if mode == 'mechanism':
+            payload = point.get('metadata', {}).get('mechanism_payload') or point.get('mechanism_payload') or {}
+            return self.text_agent.generate_mechanism_chain_card(point['text'], styled_scene_info, payload, point.get('layout', {}))
+
+        return self.text_agent.generate_knowledge_card(point['text'], styled_scene_info, point.get('duration', 3.0), point.get('layout', {}))
+
+    def _generate_svg_note_content(self, point: Dict, idx: int, intent: str) -> Dict:
+        """
+        将原本的 text / mechanism 内容统一交给 SVG 生成链。
+        失败时仍会回退到文字卡，保证系统可用。
+        """
+        transcript = point['text']
+        scene_info = point.get('scene_info', {})
+        layout_info = point.get('layout', {})
+        timestamp = point['timestamp']
+
+        if intent == "mechanism_process":
+            payload = point.get('metadata', {}).get('mechanism_payload') or point.get('mechanism_payload') or {}
+            compact = self.text_agent.generate_mechanism_chain_card(
+                transcript,
+                scene_info,
+                payload,
+                layout_info
+            )
+            title = compact.get('chain_title', compact.get('title', transcript[:60]))
+            stages = compact.get('stages', [])
+            summary = " → ".join(str(stage) for stage in stages[:3]) if stages else transcript[:120]
+            visual_description = (
+                "Create an explanatory SVG knowledge diagram for a mechanism/process segment. "
+                "Use text inside the SVG as a core part of the design. "
+                "Show 2-4 clear stages or transformations, with meaningful hierarchy. "
+                "Prefer dynamic explanatory motion if possible: staged reveal, path progression, flowing connectors, "
+                "highlight transitions, or subtle sequential activation. "
+                "Do NOT make it a generic box-and-arrow filler. "
+                f"Title: {title}. "
+                f"Key stages: {summary}. "
+                "Even if the final composition is mostly static, add subtle animation polish."
+            )
+            motion_overrides = {
+                'svg_mode_hint': 'animated_svg',
+                'motion_worthiness': max(point.get('motion_worthiness', 0.0), 0.82),
+                'motion_grammar_hint': point.get('motion_grammar_hint', 'flow') or 'flow',
+                'animation_reason': 'Mechanism/process content should be expressed as an explanatory animated SVG.',
+            }
+        else:
+            compact = self.text_agent.generate_knowledge_card(
+                transcript,
+                scene_info,
+                point.get('duration', 3.0),
+                layout_info
+            )
+            title = compact.get('hero_text', transcript[:60])
+            explanation = compact.get('explanation', transcript[:120])
+            visual_description = (
+                "Create a compact explanatory SVG note card that uses typography, shapes, and layout to present the idea. "
+                "Text should live inside the SVG, not as HTML outside it. "
+                "Use a strong title, one concise supporting line, and simple visual anchors. "
+                "Avoid generic random word nodes and avoid empty template diagrams. "
+                "If the idea supports motion, use light-to-medium animation such as staged reveal, emphasis pulse, "
+                "underline sweep, progressive highlighting, or connecting line draw-in. "
+                f"Primary takeaway: {title}. "
+                f"Supporting explanation: {explanation}."
+            )
+            motion_overrides = {
+                'svg_mode_hint': 'animated_svg',
+                'motion_worthiness': max(point.get('motion_worthiness', 0.0), 0.62),
+                'motion_grammar_hint': point.get('motion_grammar_hint', 'build') or 'build',
+                'animation_reason': 'Text insight should be rendered as a typographic SVG note with subtle animation.',
+            }
+
+        svg_point = dict(point)
+        svg_point['visual_description'] = ((point.get('visual_description') or '').strip() + ' ' + visual_description).strip()
+        svg_point['svg_mode_hint'] = motion_overrides['svg_mode_hint']
+        svg_point['motion_worthiness'] = motion_overrides['motion_worthiness']
+        svg_point['motion_grammar_hint'] = motion_overrides['motion_grammar_hint']
+        svg_point['animation_reason'] = motion_overrides['animation_reason']
+        svg_point['metadata'] = dict(point.get('metadata', {}))
+        svg_point['metadata'].update(motion_overrides)
+
+        svg_content = self._generate_svg_content(svg_point, idx)
+        if svg_content and svg_content.get('type') == 'svg':
+            svg_content['title'] = title
+            svg_content['subtitle'] = compact.get('explanation', compact.get('summary', transcript[:120]))
+            svg_content['svg_intent'] = intent
+            return svg_content
+
+        # 极端情况下回退到原先的 HTML 文本内容
+        if intent == "mechanism_process":
+            return compact
+        return compact
 
     def _load_cached_text_content(self, filename: str, content_kind: str) -> Dict:
         filepath = os.path.join(self.text_cache_dir, filename)

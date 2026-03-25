@@ -40,6 +40,8 @@ class MultimodalAnalyzer:
         max_workers: int = 1,
         layout_max_workers: int = 1,
         scene_max_workers: int = 1,
+        enable_print_layout: bool = False,
+        enable_print_scene: bool = False,
         enable_misconception: bool = False,
         enable_mechanism_chain: bool = False,
         enable_concept_graph: bool = False,
@@ -56,6 +58,8 @@ class MultimodalAnalyzer:
         self.max_workers = max(1, max_workers)
         self.layout_max_workers = max(1, layout_max_workers)
         self.scene_max_workers = max(1, scene_max_workers)
+        self.enable_print_layout = enable_print_layout
+        self.enable_print_scene = enable_print_scene
         self.enable_misconception = enable_misconception
         self.enable_mechanism_chain = enable_mechanism_chain
         self.enable_concept_graph = enable_concept_graph
@@ -65,9 +69,20 @@ class MultimodalAnalyzer:
         self.semantic_segments_path = os.path.join(self.output_dir, "semantic_segments.txt")
         
         # 初始化各Agent
-        self.layout_agent = LayoutProcessor(video_path, max_workers=self.layout_max_workers) if video_path else None
+        self.layout_agent = LayoutProcessor(
+            video_path,
+            max_workers=self.layout_max_workers,
+            vision_llm_type=self.vision_llm_type,
+            enable_print_layout=self.enable_print_layout,
+        ) if video_path else None
         self.decision_agent = DecisionAgent(self.llm_type, self.vision_llm_type, self.output_dir)
-        self.scene_agent = SceneAgent(video_path, self.output_dir, self.llm_type, max_workers=self.scene_max_workers) if video_path else None
+        self.scene_agent = SceneAgent(
+            video_path,
+            self.output_dir,
+            self.llm_type,
+            max_workers=self.scene_max_workers,
+            enable_print_scene=self.enable_print_scene,
+        ) if video_path else None
         self.confusion_agent = ConfusionAgent(self.llm_type, self.output_dir, max_workers=self.max_workers)
         self.mechanism_agent = MechanismAgent(self.llm_type, self.output_dir, max_workers=self.max_workers)
         self.concept_graph_agent = ConceptGraphAgent(
@@ -362,7 +377,11 @@ class MultimodalAnalyzer:
         
         # 调用LayoutProcessor
         if not self.layout_agent:
-            self.layout_agent = LayoutProcessor(self.video_path, max_workers=self.layout_max_workers)
+            self.layout_agent = LayoutProcessor(
+                self.video_path,
+                max_workers=self.layout_max_workers,
+                vision_llm_type=self.vision_llm_type,
+            )
         
         enhancement_points = self.layout_agent.calculate_layouts(
             decisions,

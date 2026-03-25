@@ -10,18 +10,34 @@ import cv2
 import numpy as np
 from typing import List, Dict, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from placement_judge_agent import PlacementJudgeAgent
 
 
 class LayoutProcessor:
     """布局处理器 - 全图智能搜索"""
     
-    def __init__(self, video_path: str, max_workers: int = 1):
+    def __init__(
+        self,
+        video_path: str,
+        max_workers: int = 1,
+        vision_llm_type: str = None,
+        enable_print_layout: bool = False,
+    ):
         """初始化"""
         self.video_path = video_path
         self.max_workers = max(1, max_workers)
+        self.vision_llm_type = vision_llm_type
+        self.enable_print_layout = enable_print_layout
         self._face_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
         )
+        self.safe_margin_x = 96
+        self.safe_margin_y = 68
+        self.placement_judge = PlacementJudgeAgent(vision_llm_type, debug_print=enable_print_layout) if vision_llm_type else None
+
+    def _debug(self, message: str):
+        if self.enable_print_layout:
+            print(message)
     
     def calculate_layouts(
         self,
@@ -206,17 +222,27 @@ class LayoutProcessor:
         if overlay_w is None or overlay_h is None:
             if content_type == 'svg':
                 if svg_mode_hint == 'animated_svg':
-                    overlay_w, overlay_h = 760, 430
+                    overlay_w, overlay_h = 600, 338
                 else:
-                    overlay_w, overlay_h = 640, 360
+                    overlay_w, overlay_h = 540, 304
             elif content_type == 'mechanism_chain':
-                overlay_w, overlay_h = 760, 260
+                overlay_w, overlay_h = 560, 220
             elif content_type == 'misconception':
-                overlay_w, overlay_h = 420, 240
+                overlay_w, overlay_h = 380, 220
             else:
-                overlay_w, overlay_h = 350, 200
+                if svg_mode_hint == 'animated_svg':
+                    overlay_w, overlay_h = 460, 258
+                else:
+                    overlay_w, overlay_h = 320, 180
                 
         h, w = frames[0].shape[:2]
+
+        orig_overlay_w, orig_overlay_h = overlay_w, overlay_h
+        overlay_w, overlay_h = self._adapt_overlay_size(frames, overlay_w, overlay_h, content_type)
+        self._debug(
+            f"      [Layout/debug] frame={w}x{h} type={content_type} svg_mode={svg_mode_hint} "
+            f"size {orig_overlay_w}x{orig_overlay_h} -> {overlay_w}x{overlay_h}"
+        )
         
         # 1. 生成每一帧的综合能量场（0.0 最安全 ~ 1.0 最危险）
         energy_fields = []
@@ -231,6 +257,21 @@ class LayoutProcessor:
         best_x, best_y, min_energy = self._find_minimum_energy_window(
             combined_energy, overlay_w, overlay_h, step=20
         )
+
+        candidates = self._find_candidate_windows(combined_energy, overlay_w, overlay_h, step=20, top_k=4)
+        if self.enable_print_layout and candidates:
+            pretty = ", ".join(
+                f"{cand['label']}@({cand['x']},{cand['y']},{cand['width']}x{cand['height']}) e={cand['energy']:.4f}"
+                for cand in candidates
+            )
+            print(f"      [Layout/candidates] {pretty}")
+        if candidates and self.placement_judge and self.placement_judge.available():
+            judge_frame = frames[len(frames) // 2]
+            chosen = self.placement_judge.choose(judge_frame, candidates, content_type)
+            if chosen:
+                if chosen.get('judge_reason'):
+                    print(f"      [PlacementJudge] {chosen.get('label', '?')} adjusted -> ({chosen['x']}, {chosen['y']}) | {chosen['judge_reason']}")
+                best_x, best_y, min_energy = chosen['x'], chosen['y'], chosen['energy']
         
         # 4. 判断是否可放置（单点均值能量阈值例如 >0.15 则认为过于拥挤）
         avg_energy = min_energy / (overlay_w * overlay_h)
@@ -256,6 +297,14 @@ class LayoutProcessor:
         region_context = self._extract_region_context(
             frames, best_x, best_y, overlay_w, overlay_h
         )
+        if self.enable_print_layout:
+            self._debug(
+                "      [Layout/region] "
+                f"bg={region_context.get('region_bg_color')} "
+                f"brightness={region_context.get('region_brightness')} "
+                f"type={region_context.get('region_type')} "
+                f"opacity={region_context.get('recommended_svg_opacity')}"
+            )
         
         # 将 avg_energy 映射回 0-1 的安全分数 (0.0 energy = 1.0 满分)
         safety_score = max(0.0, 1.0 - (avg_energy / 0.15))
@@ -269,6 +318,41 @@ class LayoutProcessor:
             'safety_score': float(safety_score),
             'region_context': region_context
         }
+
+    def _adapt_overlay_size(self, frames: List, overlay_w: int, overlay_h: int, content_type: str) -> Tuple[int, int]:
+        """根据画面拥挤程度自适应收缩 overlay，减少遮挡主体和舞台元素。"""
+        try:
+            frame = frames[len(frames) // 2]
+            h, w = frame.shape[:2]
+            occupancy = self._estimate_visual_occupancy(frame)
+            self._debug(f"      [Layout/occupancy] type={content_type} occupancy={occupancy:.3f}")
+            scale = 1.0
+            if occupancy > 0.36:
+                scale = 0.72
+            elif occupancy > 0.27:
+                scale = 0.82
+            elif occupancy > 0.20:
+                scale = 0.90
+
+            if content_type == 'svg':
+                min_w, min_h = 420, 236
+            elif content_type == 'mechanism_chain':
+                min_w, min_h = 420, 180
+            elif content_type == 'misconception':
+                min_w, min_h = 320, 180
+            else:
+                if content_type in ('text', 'text_card'):
+                    min_w, min_h = 360, 210
+                else:
+                    min_w, min_h = 280, 160
+
+            scaled_w = max(min_w, int(overlay_w * scale))
+            scaled_h = max(min_h, int(overlay_h * scale))
+            scaled_w = min(scaled_w, int(w * 0.52))
+            scaled_h = min(scaled_h, int(h * 0.42))
+            return scaled_w, scaled_h
+        except Exception:
+            return overlay_w, overlay_h
 
     def _map_enhancement_to_content_type(self, enhancement_type: str) -> str:
         if enhancement_type == 'svg':
@@ -311,54 +395,164 @@ class LayoutProcessor:
         center_penalty = np.clip(1.0 - (dist_from_center / (max_dist * 0.5)), 0, 0.4)
         energy = np.maximum(energy, center_penalty)
 
-        # 4. Saliency Map Penalty (显著性物体/色块避让)
+        # 4. Structural Lines Penalty (桌面边缘、麦克风支架、几何边界等)
+        line_map = self._detect_structural_lines(frame)
+        if line_map is not None:
+            energy = np.maximum(energy, line_map * 0.52)
+
+        # 5. Saliency Map Penalty (显著性物体/色块避让)
         saliency_map = self._detect_saliency(frame)
         if saliency_map is not None:
             energy = np.maximum(energy, saliency_map * 0.6)
             
         return energy
 
+    def _estimate_visual_occupancy(self, frame) -> float:
+        """估计画面中主体/显著元素的占用程度，用于决定 overlay 是否需要缩小。"""
+        try:
+            h, w = frame.shape[:2]
+            faces = self._detect_faces(frame)
+            face_area = 0.0
+            for face in faces:
+                face_area += (face['w'] * face['h']) / max(1.0, (w * h))
+
+            saliency = self._detect_saliency(frame)
+            saliency_occ = float(np.mean(saliency > 0.28)) if saliency is not None else 0.0
+
+            line_map = self._detect_structural_lines(frame)
+            line_occ = float(np.mean(line_map > 0.18)) if line_map is not None else 0.0
+
+            occupancy = 0.52 * saliency_occ + 0.28 * line_occ + 2.6 * face_area
+            return float(min(1.0, max(0.0, occupancy)))
+        except Exception:
+            return 0.0
+
     def _find_minimum_energy_window(
         self, combined_energy: np.ndarray, 
         overlay_w: int, overlay_h: int, step: int = 20
     ) -> Tuple[int, int, float]:
-        """使用积分图在能量场中寻找总能量最低的矩形窗口"""
-        # 创建积分图以便O(1)复杂度计算任意矩形的和
+        """使用积分图在能量场中寻找总能量最低的矩形窗口，并显式避开边缘与角落。"""
         integral = cv2.integral(combined_energy)
         h, w = combined_energy.shape
-        
+
+        margin_x = min(self.safe_margin_x, max(24, (w - overlay_w) // 4 if w > overlay_w else 24))
+        margin_y = min(self.safe_margin_y, max(24, (h - overlay_h) // 4 if h > overlay_h else 24))
+
+        x_start = max(0, margin_x)
+        y_start = max(0, margin_y)
+        x_end = max(x_start, w - overlay_w - margin_x)
+        y_end = max(y_start, h - overlay_h - margin_y)
+
         best_energy = float('inf')
-        best_x = 0
-        best_y = 0
-        
-        # 以步长扫描寻找最佳点
-        for y in range(0, h - overlay_h + 1, step):
-            for x in range(0, w - overlay_w + 1, step):
-                # 利用积分图计算 (x, y) 到 (x+w, y+h) 矩形块的能量和
-                # sum = I(x2,y2) - I(x1,y2) - I(x2,y1) + I(x1,y1)
+        best_x = max(0, min(x_start, w - overlay_w))
+        best_y = max(0, min(y_start, h - overlay_h))
+        area = max(1.0, float(overlay_w * overlay_h))
+
+        for y in range(y_start, y_end + 1, step):
+            for x in range(x_start, x_end + 1, step):
                 x2, y2 = x + overlay_w, y + overlay_h
                 window_energy = (
-                    integral[y2, x2] 
-                    - integral[y, x2] 
-                    - integral[y2, x] 
+                    integral[y2, x2]
+                    - integral[y, x2]
+                    - integral[y2, x]
                     + integral[y, x]
-                )
-                
-                if window_energy < best_energy:
-                    best_energy = window_energy
+                ) / area
+
+                cx = x + overlay_w / 2.0
+                cy = y + overlay_h / 2.0
+                edge_dx = min(x, w - (x + overlay_w))
+                edge_dy = min(y, h - (y + overlay_h))
+                edge_penalty = 0.0
+                if edge_dx < margin_x:
+                    edge_penalty += 0.22 * (1.0 - edge_dx / max(1.0, margin_x))
+                if edge_dy < margin_y:
+                    edge_penalty += 0.26 * (1.0 - edge_dy / max(1.0, margin_y))
+
+                vertical_target = 0.42 * h
+                vertical_penalty = 0.08 * abs(cy - vertical_target) / max(1.0, h)
+
+                near_corner = (x < margin_x * 1.25 and y < margin_y * 1.25) or (x > w - overlay_w - margin_x * 1.25 and y < margin_y * 1.25) or (x < margin_x * 1.25 and y > h - overlay_h - margin_y * 1.25) or (x > w - overlay_w - margin_x * 1.25 and y > h - overlay_h - margin_y * 1.25)
+                corner_penalty = 0.12 if near_corner else 0.0
+
+                total_energy = float(window_energy + edge_penalty + vertical_penalty + corner_penalty)
+                if total_energy < best_energy:
+                    best_energy = total_energy
                     best_x = x
                     best_y = y
-                    
+
         return best_x, best_y, best_energy
     
+    def _find_candidate_windows(
+        self,
+        combined_energy: np.ndarray,
+        overlay_w: int,
+        overlay_h: int,
+        step: int = 20,
+        top_k: int = 3,
+    ) -> List[Dict[str, float]]:
+        integral = cv2.integral(combined_energy)
+        h, w = combined_energy.shape
+        margin_x = min(self.safe_margin_x, max(24, (w - overlay_w) // 4 if w > overlay_w else 24))
+        margin_y = min(self.safe_margin_y, max(24, (h - overlay_h) // 4 if h > overlay_h else 24))
+        x_start = max(0, margin_x)
+        y_start = max(0, margin_y)
+        x_end = max(x_start, w - overlay_w - margin_x)
+        y_end = max(y_start, h - overlay_h - margin_y)
+        area = max(1.0, float(overlay_w * overlay_h))
+        scored = []
+        for y in range(y_start, y_end + 1, step):
+            for x in range(x_start, x_end + 1, step):
+                x2, y2 = x + overlay_w, y + overlay_h
+                window_energy = (
+                    integral[y2, x2] - integral[y, x2] - integral[y2, x] + integral[y, x]
+                ) / area
+                edge_dx = min(x, w - (x + overlay_w))
+                edge_dy = min(y, h - (y + overlay_h))
+                edge_penalty = 0.0
+                if edge_dx < margin_x:
+                    edge_penalty += 0.22 * (1.0 - edge_dx / max(1.0, margin_x))
+                if edge_dy < margin_y:
+                    edge_penalty += 0.26 * (1.0 - edge_dy / max(1.0, margin_y))
+                total_energy = float(window_energy + edge_penalty)
+                scored.append({'x': x, 'y': y, 'width': overlay_w, 'height': overlay_h, 'energy': total_energy})
+        for cand in scored:
+            cy = cand['y'] + overlay_h / 2.0
+            vertical_target = 0.42 * h
+            cand['energy'] += 0.06 * abs(cy - vertical_target) / max(1.0, h)
+            near_corner = (
+                (cand['x'] < margin_x * 1.25 and cand['y'] < margin_y * 1.25) or
+                (cand['x'] > w - overlay_w - margin_x * 1.25 and cand['y'] < margin_y * 1.25) or
+                (cand['x'] < margin_x * 1.25 and cand['y'] > h - overlay_h - margin_y * 1.25) or
+                (cand['x'] > w - overlay_w - margin_x * 1.25 and cand['y'] > h - overlay_h - margin_y * 1.25)
+            )
+            if near_corner:
+                cand['energy'] += 0.08
+
+        scored.sort(key=lambda item: item['energy'])
+        selected = []
+        labels = ['A', 'B', 'C', 'D']
+        for cand in scored:
+            if all(
+                abs((cand['x'] + overlay_w / 2.0) - (s['x'] + overlay_w / 2.0)) > overlay_w * 0.55 or
+                abs((cand['y'] + overlay_h / 2.0) - (s['y'] + overlay_h / 2.0)) > overlay_h * 0.45
+                for s in selected
+            ):
+                cand['label'] = labels[len(selected)] if len(selected) < len(labels) else str(len(selected)+1)
+                selected.append(cand)
+            if len(selected) >= top_k:
+                break
+        return selected
+
     def _determine_position_name(self, x: int, y: int, w: int, h: int) -> str:
         """根据坐标确定位置名称"""
         mid_x = w / 2
-        mid_y = h / 2
-        if x < mid_x and y < mid_y: return 'top-left'
-        elif x >= mid_x and y < mid_y: return 'top-right'
-        elif x < mid_x and y >= mid_y: return 'bottom-left'
-        else: return 'bottom-right'
+        top_band = h * 0.28
+        bottom_band = h * 0.72
+        if y < top_band:
+            return 'top-left' if x < mid_x else 'top-right'
+        if y > bottom_band:
+            return 'bottom-left' if x < mid_x else 'bottom-right'
+        return 'middle-left' if x < mid_x else 'middle-right'
     
     def _extract_frame_at_timestamp(self, timestamp: float):
         """提取指定时间戳的帧（通过 FFmpeg 截取图像避免 OpenCV 解码崩溃）"""
@@ -400,6 +594,38 @@ class LayoutProcessor:
             success, saliency_map = saliency.computeSaliency(frame)
             return saliency_map if success else np.zeros(frame.shape[:2], dtype=np.float32)
         except:
+            return np.zeros(frame.shape[:2], dtype=np.float32)
+
+    def _detect_structural_lines(self, frame):
+        """检测结构线，避免 overlay 压在线条、支架、桌面边缘和几何边界上。"""
+        try:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blur, 60, 160)
+            lines = cv2.HoughLinesP(
+                edges,
+                rho=1,
+                theta=np.pi / 180,
+                threshold=70,
+                minLineLength=max(40, frame.shape[1] // 14),
+                maxLineGap=18,
+            )
+
+            if lines is None:
+                return np.zeros(frame.shape[:2], dtype=np.float32)
+
+            line_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            for line in lines[:160]:
+                x1, y1, x2, y2 = line[0]
+                length = np.hypot(x2 - x1, y2 - y1)
+                if length < 32:
+                    continue
+                cv2.line(line_mask, (x1, y1), (x2, y2), 255, thickness=4)
+
+            kernel = np.ones((15, 15), np.uint8)
+            expanded = cv2.dilate(line_mask, kernel, iterations=1)
+            return expanded.astype(np.float32) / 255.0
+        except Exception:
             return np.zeros(frame.shape[:2], dtype=np.float32)
     
     def _detect_faces(self, frame):
@@ -546,11 +772,11 @@ class LayoutProcessor:
         """创建fallback布局"""
         # 根据content_type决定容器尺寸
         if content_type == 'svg':
-            width, height = 720, 420  # SVG使用更大容器，优先保证可读性
-            x, y = 100, 50  # 稍微右移避免完全在角落
+            width, height = 720, 420
+            x, y = 104, 168
         else:
-            width, height = 350, 200  # 文本使用小容器
-            x, y = 50, 50
+            width, height = 350, 200
+            x, y = 118, 224
         
         return {
             'x': x,
@@ -574,9 +800,23 @@ class LayoutProcessor:
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 cached_layouts = json.load(f)
-            
+
             layout_map = {item['timestamp']: item['layout'] for item in cached_layouts}
-            
+            if self.enable_print_layout:
+                print(f"      [Layout/cache] loaded {len(cached_layouts)} cached layouts")
+                sample = list(cached_layouts[:3])
+                for item in sample:
+                    layout = item.get('layout', {})
+                    print(
+                        "      [Layout/cache/sample] "
+                        f"t={item.get('timestamp')} "
+                        f"pos={layout.get('position')} "
+                        f"xy=({layout.get('x')},{layout.get('y')}) "
+                        f"size={layout.get('width')}x{layout.get('height')} "
+                        f"score={layout.get('safety_score')}"
+                    )
+                print("      [Layout/cache] heuristic/vllm rerank logs are skipped because cached layouts were reused")
+
             points = []
             for dec in decisions:
                 if dec['enhancement_type'] == 'none':

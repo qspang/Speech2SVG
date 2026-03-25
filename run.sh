@@ -18,6 +18,8 @@ export XIAOCHI_API_KEY="sk-3pjhBWGy2expXnpNEwbafnhcDt2NMbAQJETvAuqHTxUKNrag"
 #   With concurrency:       bash run.sh --max-workers 3
 #   Layout workers:         bash run.sh --layout-max-workers 4
 #   Scene workers:          bash run.sh --scene-max-workers 2
+#   Print layout debug:     bash run.sh --enable-print-layout
+#   Print scene debug:      bash run.sh --enable-print-scene
 #   Misconception mode:     bash run.sh --enable-misconception
 #   Mechanism mode:         bash run.sh --enable-mechanism-chain
 #   Concept graph mode:     bash run.sh --enable-concept-graph
@@ -30,24 +32,35 @@ conda activate svg
 #     --max-workers 10 \
 #     "$@"
 
-# python video_enhancer.py /home/ubuntu/sysu/svgagent/video/lx.mp4 \
+# python video_enhancer.py /home/ubuntu/sysu/svgagent/video/ted1.mp4 \
 #     --llm glm-5 \
 #     --vision-llm qwen3.5-plus \
-#     --max-workers 5 \
+#     --max-workers 10 \
 #     --svg-mode simple \
 #     --layout-max-workers 6 \
 #     --scene-max-workers 3 \
-#     --enable-mechanism-chain \
 #     --enable-concept-graph \
+#     --enable-print-layout \
 #     "$@"
 
-python video_enhancer.py /home/ubuntu/sysu/svgagent/video/lx.mp4 \
-    --llm gemini-3.1-pro-high \
-    --vision-llm gemini-3.1-pro-high \
+# python video_enhancer.py /home/ubuntu/sysu/svgagent/video/ted1.mp4 \
+#     --llm gemini-3.1-pro-high \
+#     --vision-llm gemini-3.1-pro-high \
+#     --svg-mode simple \
+#     --max-workers 5 \
+#     --layout-max-workers 6 \
+#     --scene-max-workers 3 \
+#     --enable-concept-graph \
+#     "$@" 
+
+
+python video_enhancer.py /home/ubuntu/sysu/svgagent/video/ted1.mp4 \
+    --llm gpt-5.4  \
+    --vision-llm gpt-5.4  \
+    --max-workers 10 \
     --svg-mode simple \
-    --max-workers 5 \
     --layout-max-workers 6 \
     --scene-max-workers 3 \
-    --enable-mechanism-chain \
     --enable-concept-graph \
-    "$@" 
+    --enable-print-layout \
+    "$@"
