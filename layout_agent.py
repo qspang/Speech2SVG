@@ -128,9 +128,6 @@ class LayoutProcessor:
             'metadata': {
                 'start': dec['start'],
                 'end': dec['end'],
-                'confusion_risk': dec.get('confusion_risk'),
-                'misconception_payload': dec.get('misconception_payload'),
-                'mechanism_payload': dec.get('mechanism_payload'),
                 'svg_mode_hint': dec.get('svg_mode_hint', 'none'),
                 'motion_worthiness': dec.get('motion_worthiness', 0.0),
                 'motion_grammar_hint': dec.get('motion_grammar_hint', 'none'),
@@ -357,10 +354,6 @@ class LayoutProcessor:
     def _map_enhancement_to_content_type(self, enhancement_type: str) -> str:
         if enhancement_type == 'svg':
             return 'svg_animation'
-        if enhancement_type == 'mechanism_chain':
-            return 'mechanism_chain'
-        if enhancement_type == 'misconception':
-            return 'misconception_card'
         return 'text_card'
 
     def _generate_energy_field(self, frame) -> np.ndarray:

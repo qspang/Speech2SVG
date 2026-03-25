@@ -76,10 +76,8 @@ class ContentAgent:
     def _content_priority(self, point: Dict) -> int:
         content_type = point.get('content_type')
         priorities = {
-            'mechanism_chain': 0,
-            'misconception_card': 1,
-            'text_card': 2,
-            'svg_animation': 3,
+            'text_card': 0,
+            'svg_animation': 1,
         }
         return priorities.get(content_type, 99)
 
@@ -116,7 +114,7 @@ class ContentAgent:
                 batch = [
                     (idx, point) for idx, point in ordered_points
                     if self._content_priority(point) == priority
-                    and point['content_type'] in ('svg_animation', 'text_card', 'misconception_card', 'mechanism_chain')
+                    and point['content_type'] in ('svg_animation', 'text_card')
                 ]
                 if not batch:
                     continue
@@ -159,14 +157,6 @@ class ContentAgent:
             content = self._generate_text_content(point, idx)
             point['content'] = content
             print(f"    [{idx+1}] Text→SVG: {content.get('title', point.get('text', 'No Text')[:40])}")
-        elif point['content_type'] == 'misconception_card':
-            content = self._generate_misconception_content(point, idx)
-            point['content'] = content
-            print(f"    [{idx+1}] Misconception: {content.get('hero_text', 'No Text')}")
-        elif point['content_type'] == 'mechanism_chain':
-            content = self._generate_mechanism_chain_content(point, idx)
-            point['content'] = content
-            print(f"    [{idx+1}] Mechanism→SVG: {content.get('title', point.get('text', 'No Title')[:40])}")
     
     def _build_styled_scene_info(self, point: Dict, content_kind: str) -> Dict:
         """为每个 overlay 单独规划背景/边框/文字颜色。"""
@@ -359,27 +349,6 @@ class ContentAgent:
         """生成文字内容（专用 text->SVG 链）"""
         return self._generate_t2svg_content(point, idx, mode="text")
 
-    def _generate_misconception_content(self, point: Dict, idx: int) -> Dict:
-        cache_name = f"misconception_{idx}_{int(point['timestamp'])}.txt"
-        cached = self._load_cached_text_content(cache_name, "misconception_card")
-        if cached:
-            return cached
-
-        payload = point.get('metadata', {}).get('misconception_payload') or point.get('misconception_payload') or {}
-        content = self.text_agent.generate_misconception_card(
-            point['text'],
-            point.get('scene_info', {}),
-            payload,
-            point.get('layout', {})
-        )
-        self._save_text_content(cache_name, content)
-        return content
-
-    def _generate_mechanism_chain_content(self, point: Dict, idx: int) -> Dict:
-        """生成机制链内容（专用 text->SVG 链）"""
-        return self._generate_t2svg_content(point, idx, mode="mechanism")
-
-
     def _generate_t2svg_content(self, point: Dict, idx: int, mode: str) -> Dict:
         """
         文字 / 机制链统一走独立的 text-to-SVG 生成链。
@@ -412,18 +381,14 @@ class ContentAgent:
             except Exception as e:
                 print(f"      [Cache] Failed to load t2svg {filename}: {e}, regenerating.")
 
-        payload = {}
-        if mode == 'mechanism':
-            payload = point.get('metadata', {}).get('mechanism_payload') or point.get('mechanism_payload') or {}
-
-        styled_scene_info = self._build_styled_scene_info(point, 't2svg_mechanism' if mode == 'mechanism' else 't2svg_text')
+        styled_scene_info = self._build_styled_scene_info(point, 't2svg_text')
 
         result = self.text_to_svg_agent.generate_text_svg(
             transcript=point['text'],
             scene_info=styled_scene_info,
             layout_info=point.get('layout', {}),
-            mode=mode,
-            payload=payload,
+            mode="text",
+            payload={},
         )
 
         svg_content = result.get('svg_content', '').strip()
@@ -436,15 +401,30 @@ class ContentAgent:
                 'svg_content': svg_content,
                 'title': result.get('title', point.get('text', '')[:72]),
                 'subtitle': result.get('subtitle', point.get('text', '')[:120]),
-                'svg_intent': 'mechanism_process' if mode == 'mechanism' else 'knowledge_note',
+                'svg_intent': 'knowledge_note',
                 'overlay_style': styled_scene_info.get('overlay_style', {}),
             }
-
-        if mode == 'mechanism':
-            payload = point.get('metadata', {}).get('mechanism_payload') or point.get('mechanism_payload') or {}
-            return self.text_agent.generate_mechanism_chain_card(point['text'], styled_scene_info, payload, point.get('layout', {}))
-
-        return self.text_agent.generate_knowledge_card(point['text'], styled_scene_info, point.get('duration', 3.0), point.get('layout', {}))
+        fallback_result = self.text_to_svg_agent.generate_text_svg(
+            transcript=point['text'],
+            scene_info=styled_scene_info,
+            layout_info=point.get('layout', {}),
+            mode="text",
+            payload={},
+        )
+        fallback_svg = fallback_result.get('svg_content', '').strip()
+        if fallback_svg:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(fallback_svg)
+            return {
+                'type': 'svg',
+                'path': f'temp_analysis/assets/t2svg/{filename}',
+                'svg_content': fallback_svg,
+                'title': fallback_result.get('title', point.get('text', '')[:72]),
+                'subtitle': fallback_result.get('subtitle', point.get('text', '')[:120]),
+                'svg_intent': 'knowledge_note',
+                'overlay_style': styled_scene_info.get('overlay_style', {}),
+            }
+        return self._generate_fallback_svg(point['text'], styled_scene_info, idx, point['timestamp'], point.get('layout', {}))
 
     def _generate_svg_note_content(self, point: Dict, idx: int, intent: str) -> Dict:
         """

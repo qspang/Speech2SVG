@@ -22,8 +22,6 @@ from layout_agent import LayoutProcessor
 from decision_agent import DecisionAgent
 from scene_agent import SceneAgent
 from content_agent import ContentAgent
-from confusion_agent import ConfusionAgent
-from mechanism_agent import MechanismAgent
 from concept_graph_agent import ConceptGraphAgent
 
 
@@ -42,8 +40,6 @@ class MultimodalAnalyzer:
         scene_max_workers: int = 1,
         enable_print_layout: bool = False,
         enable_print_scene: bool = False,
-        enable_misconception: bool = False,
-        enable_mechanism_chain: bool = False,
         enable_concept_graph: bool = False,
     ):
         """初始化分析器"""
@@ -60,8 +56,6 @@ class MultimodalAnalyzer:
         self.scene_max_workers = max(1, scene_max_workers)
         self.enable_print_layout = enable_print_layout
         self.enable_print_scene = enable_print_scene
-        self.enable_misconception = enable_misconception
-        self.enable_mechanism_chain = enable_mechanism_chain
         self.enable_concept_graph = enable_concept_graph
         
         # 文件路径
@@ -83,8 +77,6 @@ class MultimodalAnalyzer:
             max_workers=self.scene_max_workers,
             enable_print_scene=self.enable_print_scene,
         ) if video_path else None
-        self.confusion_agent = ConfusionAgent(self.llm_type, self.output_dir, max_workers=self.max_workers)
-        self.mechanism_agent = MechanismAgent(self.llm_type, self.output_dir, max_workers=self.max_workers)
         self.concept_graph_agent = ConceptGraphAgent(
             self.llm_type,
             self.output_dir,
@@ -109,7 +101,7 @@ class MultimodalAnalyzer:
         decisions: List[Dict[str, Any]],
         persist: bool = False
     ) -> List[Dict[str, Any]]:
-        """Normalize cached/routed decisions so disabled features cannot leak downstream."""
+        """Normalize decisions to the current simplified pipeline: svg + text only."""
         sanitized = []
         changed = 0
 
@@ -117,25 +109,25 @@ class MultimodalAnalyzer:
             dec = deepcopy(decision)
             etype = dec.get("enhancement_type", "none")
 
-            if etype == "misconception" and not self.enable_misconception:
+            if etype == "misconception":
                 dec["enhancement_type"] = "text"
                 dec.pop("misconception_payload", None)
                 dec.pop("confusion_risk", None)
                 reason = dec.get("reason", "flag_disabled")
-                dec["reason"] = f"{reason} | misconception_disabled"
+                dec["reason"] = f"{reason} | misconception_removed_to_text"
                 changed += 1
 
-            if dec.get("enhancement_type") == "mechanism_chain" and not self.enable_mechanism_chain:
+            if dec.get("enhancement_type") == "mechanism_chain":
                 dec["enhancement_type"] = "svg"
                 dec.pop("mechanism_payload", None)
                 reason = dec.get("reason", "flag_disabled")
-                dec["reason"] = f"{reason} | mechanism_disabled"
+                dec["reason"] = f"{reason} | mechanism_removed_to_svg"
                 changed += 1
 
             sanitized.append(dec)
 
         if changed:
-            print(f"  > Feature flags normalized {changed} cached/routed decisions")
+            print(f"  > Simplified pipeline normalized {changed} cached/routed decisions")
             if persist:
                 save_decisions(sanitized, os.path.join(self.output_dir, "enhancement_decisions.txt"))
 
@@ -328,18 +320,6 @@ class MultimodalAnalyzer:
         decisions = self.decision_agent.classify_segments(segments, force_reprocess, max_workers=self.max_workers)
         self.global_summary = self.decision_agent.latest_global_summary
         decisions = self._apply_feature_flags_to_decisions(decisions, persist=True)
-
-        if self.enable_misconception:
-            print("  > Running misconception analysis...")
-            decisions = self.confusion_agent.analyze_segments(
-                segments, decisions, self.global_summary, force_reprocess
-            )
-
-        if self.enable_mechanism_chain:
-            print("  > Running mechanism-chain analysis...")
-            decisions = self.mechanism_agent.analyze_segments(
-                segments, decisions, self.global_summary, force_reprocess
-            )
 
         if self.enable_concept_graph:
             print("  > Building concept graph...")

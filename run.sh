@@ -20,10 +20,8 @@ export XIAOCHI_API_KEY="sk-3pjhBWGy2expXnpNEwbafnhcDt2NMbAQJETvAuqHTxUKNrag"
 #   Scene workers:          bash run.sh --scene-max-workers 2
 #   Print layout debug:     bash run.sh --enable-print-layout
 #   Print scene debug:      bash run.sh --enable-print-scene
-#   Misconception mode:     bash run.sh --enable-misconception
-#   Mechanism mode:         bash run.sh --enable-mechanism-chain
 #   Concept graph mode:     bash run.sh --enable-concept-graph
-#   Combine modes:          bash run.sh --enable-misconception --enable-mechanism-chain --enable-concept-graph
+#   Combine modes:          bash run.sh --enable-concept-graph --enable-print-layout
 conda activate svg
 # Run video enhancer
 # python video_enhancer.py /home/ubuntu/sysu/svgagent/video/futureai.mp4 \

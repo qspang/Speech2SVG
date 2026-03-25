@@ -223,14 +223,6 @@ class HTMLGenerator:
                 </div>
                     <div class="gallery-viewport" id="galleryViewport">
                         <div class="gallery-home">
-                            <div class="gallery-category-card mechanism-card">
-                                <div class="gallery-category-icon">⚙</div>
-                                <div class="gallery-category-copy">
-                                    <div class="gallery-category-title">机制链</div>
-                                    <div class="gallery-category-desc">用于展示过程、链路与机制关系</div>
-                                </div>
-                                <button class="gallery-enter-btn" onclick="openGalleryDetail('mechanism')">→</button>
-                            </div>
                             <div class="gallery-category-card text-card">
                                 <div class="gallery-category-icon">文</div>
                                 <div class="gallery-category-copy">
@@ -341,10 +333,6 @@ class HTMLGenerator:
         container_class = "enhancement-container"
         if content_type == 'svg':
             container_class += " svg-overlay"
-        elif content_type == 'mechanism_chain':
-            container_class += " mechanism-overlay"
-        elif content_type == 'misconception':
-            container_class += " misconception-overlay"
         if content_type != 'svg' and left_pct > 58.0:
             container_class += edge_class
 
@@ -370,13 +358,7 @@ class HTMLGenerator:
         svg_path = content.get('path', '')
         svg_mode_hint = point.get('svg_mode_hint', point.get('metadata', {}).get('svg_mode_hint', 'static_svg'))
 
-        if point_content_type == 'mechanism_chain':
-            category = 'mechanism'
-            display_type = '机制链'
-            title = content.get('title', content.get('chain_title', topic))[:60]
-            summary = content.get('subtitle', " → ".join(str(stage) for stage in content.get('stages', [])[:3]))[:160]
-            icon = '⚙'
-        elif point_content_type == 'text_card':
+        if point_content_type == 'text_card':
             category = 'text'
             display_type = '文字'
             title = content.get('title', topic)[:60] or topic[:60]
