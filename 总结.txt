@@ -1,0 +1,642 @@
+视频辅助理解增强系统：当前代码版总结
+==================================================
+
+一、系统定位
+------------
+
+当前系统的目标是：输入一段视频，自动识别其中“值得被额外解释”的内容，并在播放时以同步浮层的方式叠加解释性增强内容，帮助用户更快理解视频中的复杂概念、结构关系和关键信息。
+
+系统分成两层：
+
+1. 外层视频增强系统  
+   负责转录、语义分段、增强决策、时间片段筛选、布局、场景分析、内容生成协调，以及最终 HTML 播放页输出。
+
+2. 内层 SVG / T2SVG 生成系统  
+   负责把选中的增强点真正转成可显示的内容：
+   - `svg_simple/`：生成结构型、关系型、动态图/半动态图 SVG
+   - `text_to_svg_agent.py`：生成文字型增强卡，也就是 t2svg
+
+当前主系统已经是“视频理解 + 布局 + 风格 + 内容生成 + HTML 联动”的完整链路，不再是早期的单纯字幕转图片。
+
+
+二、当前真实主流程
+------------------
+
+主入口：
+
+- `video_enhancer.py`
+- 内部总协调器：`multimodal_analyzer.py`
+
+当前主流程如下：
+
+1. Phase 1：Whisper 转录  
+2. Phase 2：语义分段  
+3. Phase 3：DecisionAgent 决定 `svg / text / none`  
+4. Phase 3.2：可选构建全局概念图 `concept_graph.json`  
+5. Phase 3.5：PlacementSegmentAgent 在布局前先缩短到更稳定的场景子片段  
+6. Phase 4：LayoutAgent 计算放置位置和大小  
+7. Phase 5：SceneAgent 对放置区域做多帧视觉分析  
+8. Phase 6：ContentAgent 路由到 `svg_simple` 或 `TextToSVGAgent`  
+9. Phase 7：HTMLGenerator 输出最终 `enhanced_video.html`
+
+现在已经没有机制链 `mechanism_chain` 和误解纠偏 `misconception` 的主流程分支了，当前真实分路已经收敛成：
+
+- `svg`
+- `text`
+- `none`
+
+
+三、主流程中的上下文注入
+------------------------
+
+这个系统的关键，不是只看当前字幕句子，而是不断把上下文往后传。
+
+1. Decision 阶段的上下文
+
+- 全局上下文：`global_summary.txt`
+- 局部上下文：当前 segment 前后若干条字幕
+
+DecisionAgent 不是只判断“这句话能不能画”，而是判断：
+
+- 这一段是否值得增强
+- 更适合 `svg` 还是 `text`
+- 如果是 `svg`，是否值得更强调动态图表达
+
+输出里会包含：
+
+- `enhancement_type`
+- `visual_description`
+- `svg_mode_hint`
+- `motion_worthiness`
+- `motion_grammar_hint`
+- `animation_reason`
+
+2. 布局阶段的上下文
+
+Layout 不是只拿一个时间点的单帧。当前系统会先经过 `PlacementSegmentAgent`：
+
+- 如果原字幕片段很长，例如 20 秒
+- 系统先在这 20 秒里做轻量场景二分
+- 如果确实存在两个场景，就优先选择停留更久、更稳定的那一个子片段
+
+后面的 layout / scene / frame sampling 都基于这个新的 `refined_start / refined_end`。
+
+3. Scene 阶段的上下文
+
+SceneAgent 输入的不是全局视频，而是：
+
+- 已经选好的放置时间片段
+- 已经确定的布局区域
+
+它会围绕“这个位置、这个时间段”做多帧分析，输出局部设计指导。
+
+4. 内容生成阶段的上下文
+
+ContentAgent 在真正生成前，会把：
+
+- 字幕文本
+- 决策阶段的 `visual_description`
+- layout 的 `region_context`
+- scene 的 `design_guide`
+- 单 overlay 的样式规划结果
+
+一起注入给 `svg_simple` 或 `TextToSVGAgent`。
+
+也就是说，当前生成器看到的并不是裸字幕，而是已经经过“语义、位置、场景、样式”多轮加工后的上下文。
+
+
+四、各阶段输入输出
+------------------
+
+1. Whisper 转录
+
+输入：
+
+- 视频文件
+
+输出：
+
+- `whisper_transcript.txt`
+
+每条记录包含：
+
+- `text`
+- `start`
+- `end`
+
+2. 语义分段
+
+输入：
+
+- Whisper 句子级 transcript
+
+输出：
+
+- `semantic_segments.txt`
+
+它会把相邻句子按语义相似性聚合成更适合增强判断的段落。
+
+3. 增强决策
+
+输入：
+
+- `semantic_segments`
+- `global_summary`
+- 局部滑动窗口上下文
+
+输出：
+
+- `enhancement_decisions.txt`
+
+当前真实类型：
+
+- `svg`
+- `text`
+- `none`
+
+4. 放置时间片段 refinement
+
+输入：
+
+- `enhancement_decisions.txt`
+
+输出：
+
+- `placement_time_segments.txt`
+
+每条记录包含：
+
+- 原始时间窗
+- refined 时间窗
+- 是否检测到二分场景
+- 选择理由
+- 变化分数
+
+5. 布局
+
+输入：
+
+- refined decisions
+- 视频多帧
+
+输出：
+
+- `layout_positions.txt`
+
+每个增强点都会得到：
+
+- `x / y / width / height`
+- `position`
+- `safety_score`
+- `region_context`
+
+6. 场景分析
+
+输入：
+
+- refined 时间窗
+- layout 的区域位置
+
+输出：
+
+- `scene_analysis.txt`
+
+每个增强点会得到：
+
+- `color_hierarchy`
+- `visual_complexity`
+- `design_guide`
+
+7. 内容生成
+
+输入：
+
+- text
+- layout
+- scene
+- decision metadata
+
+输出：
+
+- `assets/svg/*.svg`
+- `assets/t2svg/*.svg`
+- 最终 HTML 中的 overlay 内容
+
+
+五、DecisionAgent：当前的分流器
+------------------------------
+
+`decision_agent.py` 是当前系统最重要的早期模块之一。
+
+它的作用不是简单三分类，而是“先理解，再分流”。
+
+它会综合：
+
+- 当前语义段本身
+- 全局主题
+- 局部前后文
+
+去决定这一段：
+
+- 是否值得增强
+- 适合 `svg` 还是 `text`
+- 如果走 `svg`，是否有足够的动态图价值
+
+当前输出最重要的字段是：
+
+- `enhancement_type`
+- `visual_description`
+- `svg_mode_hint`
+- `motion_worthiness`
+- `motion_grammar_hint`
+- `animation_reason`
+
+DecisionAgent 后面还有节奏控制逻辑：
+
+- 稀疏化
+- 补密
+- 节奏约束
+
+所以最终决策是“LLM 判断 + 后处理节奏控制”的结合。
+
+
+六、PlacementSegmentAgent：布局前先选更稳定时间窗
+-------------------------------------------------
+
+`placement_segment_agent.py` 是后来新增的重要步骤。
+
+原因是：原字幕时间段可能很长，而视频画面在这段时间里已经切换过场景。如果直接拿整个时间段去 layout，会让布局既保守又不稳定。
+
+当前做法是：
+
+- 对较长片段抽多帧
+- 用轻量场景变化检测做二分类式切分
+- 找出变化边界
+- 从左右两段里选择“停留更久且更稳定”的那一段
+
+这样后续的：
+
+- layout frame sampling
+- scene analysis
+- VLM placement judging
+
+都基于更稳定的新时间片段，而不是整段原字幕时间。
+
+
+七、LayoutAgent：当前布局逻辑
+----------------------------
+
+`layout_agent.py` 现在不是固定角落布局，而是：
+
+- 全图搜索
+- 多帧时域评估
+- 人脸避让优先
+- VLM 二次复判
+
+1. 多帧采样
+
+Layout 会对一个增强点持续的时间窗抽多帧，而不是只看单帧。
+
+2. 人脸检测
+
+当前已经从旧的 Haar Cascade 切换成了 YuNet：
+
+- 模型：`face_detection_yunet_2023mar.onnx`
+
+这是当前最硬的避让条件，因为系统现在的布局目标是：
+
+- 最重要的是不要挡住人脸
+- 其他区域约束可以更软
+
+3. 传统视觉能量图
+
+Layout 里仍然会构造能量场，参考信息包括：
+
+- 人脸
+- 显著性
+- 结构线
+- 底部区域
+- 边缘距离
+
+但这些现在大多都已经弱化为“参考项”，不再像早期那样过度保守。
+
+4. 先大后筛
+
+当前布局策略已经明显向“大尺寸、安全上限”倾斜：
+
+- 先尝试更大的 overlay 尺寸
+- 对不同大小都做一次全图搜索
+- 不是先缩小，而是先找“最大的安全候选”
+
+5. PlacementJudgeAgent：VLM 复判
+
+`placement_judge_agent.py` 会拿：
+
+- Start / Middle / End 三个代表帧
+- 候选框预览图
+
+交给视觉模型复判。
+
+Prompt 里现在强调：
+
+- 非人脸区域只是软参考
+- 人脸避让是最硬约束
+- 优先选择尽可能大的位置
+- 可以把候选框想象成一块真正遮挡视频的黑色区域，再判断还能不能放大或需要缩小
+
+因此当前布局已经是：
+
+- 传统算法粗筛
+- VLM 做更大胆的最终判断
+
+输出结果最终会被写成相对稳定的布局坐标，后续 HTML 再映射为相对百分比定位，所以视频容器大小变化时仍然能自适应。
+
+
+八、SceneAgent：布局之后的局部场景分析
+--------------------------------------
+
+`scene_agent.py` 当前的作用，是在已经知道“放在哪里”的前提下，分析那个局部区域应该用什么视觉风格。
+
+它会在放置时间窗里抽多帧，对局部区域做分析，输出：
+
+- `color_hierarchy`
+- `color_metrics`
+- `visual_complexity`
+- `design_guide`
+
+`design_guide` 里最重要的内容包括：
+
+- 推荐的强调色
+- 次强调色
+- 文字色
+- 风格提示
+- SVG prompt 风格建议
+- 文本风格建议
+
+这意味着当前系统的颜色和风格已经不是拍脑袋的固定模板，而是和视频局部区域绑定的。
+
+
+九、OverlayStyleAgent：单个 overlay 的样式规划
+---------------------------------------------
+
+`overlay_style_agent.py` 负责做最后一层每-overlay 样式规划。
+
+它会结合：
+
+- transcript
+- scene_info
+- layout_info
+- content_kind
+
+为这一张 overlay 规划：
+
+- `background`
+- `border`
+- `primary_accent`
+- `secondary_accent`
+- `text`
+- `bg_opacity`
+
+当前背景策略已经改成更强调透明背景和可见实体本身，而不是大块不透明底板。
+
+所以真正落到 `svg` 或 `t2svg` 上的颜色，并不只是 SceneAgent 的输出，而是 SceneAgent + OverlayStyleAgent 的结合。
+
+
+十、当前内容生成的真实分路
+--------------------------
+
+`content_agent.py` 现在的真实分路已经很清楚：
+
+1. `svg_animation`
+
+输入：
+
+- transcript
+- layout_context
+- scene_context
+- motion_context
+- visual_description
+
+输出：
+
+- `assets/svg/animation_{idx}_{timestamp}.svg`
+
+主链：
+
+- `svg_simple/main.py`
+
+2. `text_card`
+
+输入：
+
+- transcript
+- layout_info
+- styled scene_info
+
+输出：
+
+- `assets/t2svg/text_v6_{idx}_{timestamp}.svg`
+
+主链：
+
+- `text_to_svg_agent.py`
+
+当前没有再走：
+
+- `mechanism_chain`
+- `misconception_card`
+
+它们已经从主链中移除。
+
+
+十一、T2SVG：当前文字增强链
+---------------------------
+
+`text_to_svg_agent.py` 的定位是：把文本型增强转成真正可显示的 typographic SVG，而不是普通 HTML 文字块。
+
+当前主要逻辑：
+
+1. 先做文案提纯  
+   从字幕中提取更适合视觉呈现的文字，尽量压成一段或最多两段。
+
+2. 使用场景和布局信息  
+   生成时会考虑：
+   - 画布尺寸
+   - overlay 的宽高
+   - 局部区域颜色
+   - 文字与视频背景的对比可读性
+
+3. 直接生成 SVG  
+   当前主路径已经是把：
+   - 尺寸
+   - 文字层级
+   - 颜色要求
+   - 强调词
+
+   交给 LLM 直接排版，而不是再用很强的本地贪心算法控制布局。
+
+4. 输出要求
+
+- 普通 text mode 优先一段，最多两段
+- 支持局部强调色关键词
+- 透明背景，不再强依赖大底板
+- 适配视频角落显示
+
+
+十二、SVG Simple：当前 SVG 生成链
+--------------------------------
+
+`svg_simple/` 是普通 SVG 的主生成系统。
+
+当前完整链路已经变成：
+
+`VisualStrategy -> SVGGenerator -> SVGValidator -> VisualCritic -> (optional) SVGRefiner -> SVGValidator`
+
+1. `visual_strategy.py`
+
+职责：
+
+- 把原始字幕、layout、scene、motion 上下文压缩成 design brief
+- 不是直接作图，而是先提炼“应该画什么、怎么画、强调什么”
+
+输入上下文包括：
+
+- 字幕文本
+- layout 的区域尺寸和 `region_context`
+- scene 的 `design_guide`
+- motion hint
+- visual_description
+
+输出的 `design_brief` 里包括：
+
+- `core_topic`
+- `display_title`
+- `display_subtitle`
+- `key_elements`
+- `layout_concept`
+- `style_directive`
+- `animation_intent`
+- `font_plan`
+- `target_render`
+
+2. `svg_generator.py`
+
+职责：
+
+- 让 LLM 直接写 SVG 代码
+
+当前 prompt 的关键约束：
+
+- 只允许两种字号
+- 面向小尺寸视频浮层
+- 主体更大
+- 元素更少
+- 线条更粗
+- 不允许全画布背景板
+- 保持透明背景
+
+3. `svg_validator.py`
+
+职责：
+
+- 渲染测试
+- XML/CSS 修补
+- 透明背景清理
+- 左上角聚集几何检测
+
+当前在进入后续步骤前，会先做：
+
+- `simple_render_test`
+- `detect_top_left_cluster`
+
+如果失败，会直接要求上游重新生成，而不是把坏 SVG 继续传下去。
+
+4. `visual_critic.py`
+
+这是新增的视觉评审层，使用视觉模型对“渲染后的 SVG”做打分。
+
+当前五个评分维度是：
+
+- `clarity_readability`
+- `semantic_consistency`
+- `composition_balance`
+- `small_overlay_suitability`
+- `visual_emphasis_aesthetics`
+
+其中 `semantic_consistency` 会显式结合字幕文本来判断图像是不是和原语义一致。
+
+无论分高分低，critic 都会给出：
+
+- strengths
+- issues
+- improvement_suggestions
+
+5. `svg_refiner.py`
+
+如果 `visual_critic` 的平均分不超过 `8.5`，系统会进入 refine。
+
+Refine 的作用是：
+
+- 保留原始语义
+- 根据 critic 的具体问题重写 SVG
+
+Refine 完成后还会再次进入 validator，确保 refined SVG 仍然可渲染、几何位置正常、结构合法。
+
+
+十三、HTMLGenerator：当前前端输出
+---------------------------------
+
+`html_generator.py` 目前已经被简化为比较直接的展示页。
+
+当前页面核心结构：
+
+- 左侧：视频播放器 + overlay 容器
+- 左下：增强内容画廊
+- 右侧：字幕面板
+
+当前 HTML 已经去掉了很多旧版冗余结构，例如复杂概念图区和多层预览逻辑。
+
+保留的关键交互包括：
+
+- 点击字幕跳到对应时间
+- 点击画廊缩略图跳到对应增强点
+- 视频播放时同步控制 overlay 出现和消失
+- 点击时间点后重新触发 SVG 动画
+
+布局是相对定位，所以视频框大小改变时，overlay 仍然会跟着缩放。
+
+
+十四、当前缓存与中间文件
+------------------------
+
+系统当前会生成并复用这些关键缓存：
+
+- `whisper_transcript.txt`
+- `semantic_segments.txt`
+- `global_summary.txt`
+- `enhancement_decisions.txt`
+- `placement_time_segments.txt`
+- `layout_positions.txt`
+- `scene_analysis.txt`
+- `assets/svg/*.svg`
+- `assets/t2svg/*.svg`
+
+此外 compare / OSS 等实验和部署脚本会再生成额外记录文件，但不属于主内容生成链的核心部分。
+
+
+十五、当前系统的真实特点
+------------------------
+
+如果只用一句话概括当前系统，它已经不是“字幕变图”，而是：
+
+一个带有全局上下文、局部上下文、布局感知、场景感知、样式感知、视觉评审与二次修正能力的视频辅助理解增强系统。
+
+它的当前主优势是：
+
+1. 决策阶段已经有全局和局部上下文注入  
+2. 布局阶段已经从单帧保守搜索升级成多帧 + YuNet + VLM 复判  
+3. 内容生成阶段已经明确区分 `svg` 与 `t2svg` 两条主链  
+4. `svg_simple` 现在多了 `visual_critic -> refine` 的质量闭环  
+5. 前端 HTML 已经被简化成更适合真实对比实验和人工检查的形态
+
+以上就是当前代码版本的真实系统结构。
