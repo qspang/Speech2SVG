@@ -28,16 +28,36 @@ class LayoutProcessor:
         self.max_workers = max(1, max_workers)
         self.vision_llm_type = vision_llm_type
         self.enable_print_layout = enable_print_layout
-        self._face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        self._yunet_model_path = os.path.join(
+            os.path.dirname(__file__),
+            "models",
+            "face_detection_yunet_2023mar.onnx",
         )
-        self.safe_margin_x = 96
-        self.safe_margin_y = 68
+        self._face_detector = self._init_face_detector()
+        self.safe_margin_x = 36
+        self.safe_margin_y = 28
         self.placement_judge = PlacementJudgeAgent(vision_llm_type, debug_print=enable_print_layout) if vision_llm_type else None
 
     def _debug(self, message: str):
         if self.enable_print_layout:
             print(message)
+
+    def _init_face_detector(self):
+        try:
+            if os.path.exists(self._yunet_model_path) and hasattr(cv2, "FaceDetectorYN_create"):
+                detector = cv2.FaceDetectorYN_create(
+                    self._yunet_model_path,
+                    "",
+                    (320, 320),
+                    0.78,
+                    0.3,
+                    5000,
+                )
+                self._debug(f"      [Layout] YuNet enabled: {self._yunet_model_path}")
+                return detector
+        except Exception as e:
+            print(f"      YuNet init failed: {e}")
+        return None
     
     def calculate_layouts(
         self,
@@ -49,8 +69,11 @@ class LayoutProcessor:
         layout_cache_path = os.path.join(output_dir, "layout_positions.txt")
         
         if not force and os.path.exists(layout_cache_path):
-            print(f"  > Loading cached layouts from {layout_cache_path}")
-            return self._load_cached_layouts(decisions, layout_cache_path)
+            cached_points = self._load_cached_layouts(decisions, layout_cache_path)
+            if cached_points is not None:
+                print(f"  > Loading cached layouts from {layout_cache_path}")
+                return cached_points
+            print(f"  > Layout cache stale after placement-window refinement. Recomputing.")
         
         print(f"  > Calculating layouts with full-screen search + temporal detection (workers={self.max_workers})...")
         
@@ -88,7 +111,12 @@ class LayoutProcessor:
                 print(f"    [{idx+1}] {start_time:.1f}s: (已舍弃 - 无安全放置空间)")
                 continue
             enhancement_points.append(point)
-            layouts.append({'timestamp': start_time, 'layout': layout})
+            layouts.append({
+                'timestamp': start_time,
+                'end': point['timestamp'] + point['duration'],
+                'text': point['text'],
+                'layout': layout,
+            })
             print(f"    [{idx+1}] {start_time:.1f}s: ({layout['x']}, {layout['y']}) "
                   f"score={layout['safety_score']:.2f}")
         
@@ -128,6 +156,9 @@ class LayoutProcessor:
             'metadata': {
                 'start': dec['start'],
                 'end': dec['end'],
+                'original_start': dec.get('original_start', dec['start']),
+                'original_end': dec.get('original_end', dec['end']),
+                'placement_window': dec.get('placement_window', {}),
                 'svg_mode_hint': dec.get('svg_mode_hint', 'none'),
                 'motion_worthiness': dec.get('motion_worthiness', 0.0),
                 'motion_grammar_hint': dec.get('motion_grammar_hint', 'none'),
@@ -219,18 +250,18 @@ class LayoutProcessor:
         if overlay_w is None or overlay_h is None:
             if content_type == 'svg':
                 if svg_mode_hint == 'animated_svg':
-                    overlay_w, overlay_h = 600, 338
+                    overlay_w, overlay_h = 760, 428
                 else:
-                    overlay_w, overlay_h = 540, 304
+                    overlay_w, overlay_h = 700, 394
             elif content_type == 'mechanism_chain':
-                overlay_w, overlay_h = 560, 220
+                overlay_w, overlay_h = 680, 260
             elif content_type == 'misconception':
-                overlay_w, overlay_h = 380, 220
+                overlay_w, overlay_h = 460, 252
             else:
                 if svg_mode_hint == 'animated_svg':
-                    overlay_w, overlay_h = 460, 258
+                    overlay_w, overlay_h = 560, 314
                 else:
-                    overlay_w, overlay_h = 320, 180
+                    overlay_w, overlay_h = 460, 258
                 
         h, w = frames[0].shape[:2]
 
@@ -250,29 +281,75 @@ class LayoutProcessor:
         # 2. 将多帧的能量场叠加并取最大值（确保整个持续时间内该位置均安全）
         combined_energy = np.max(np.array(energy_fields), axis=0)
         
-        # 3. 使用积分图加速二维矩形区域求和
-        best_x, best_y, min_energy = self._find_minimum_energy_window(
-            combined_energy, overlay_w, overlay_h, step=20
+        size_variants = self._build_size_variants(frames, overlay_w, overlay_h, content_type)
+        all_candidates = []
+        for cand_w, cand_h in size_variants:
+            all_candidates.extend(
+                self._find_candidate_windows(
+                    combined_energy,
+                    cand_w,
+                    cand_h,
+                    step=20,
+                    top_k=3,
+                )
+            )
+
+        if not all_candidates:
+            return self._create_fallback_layout(content_type)
+
+        min_avg_energy = min(c['avg_energy'] for c in all_candidates)
+        safe_pool = [
+            c for c in all_candidates
+            if c['avg_energy'] <= min(0.24, min_avg_energy + 0.05)
+        ]
+        ranked_pool = safe_pool or all_candidates
+        ranked_pool.sort(
+            key=lambda c: (
+                -c['area_ratio'],
+                c['score'],
+                c['avg_energy'],
+            )
         )
 
-        candidates = self._find_candidate_windows(combined_energy, overlay_w, overlay_h, step=20, top_k=4)
+        candidates = []
+        labels = ['A', 'B', 'C', 'D']
+        for cand in ranked_pool:
+            if all(
+                abs((cand['x'] + cand['width'] / 2.0) - (s['x'] + s['width'] / 2.0)) > min(cand['width'], s['width']) * 0.40 or
+                abs((cand['y'] + cand['height'] / 2.0) - (s['y'] + s['height'] / 2.0)) > min(cand['height'], s['height']) * 0.36
+                for s in candidates
+            ):
+                cand = dict(cand)
+                cand['label'] = labels[len(candidates)] if len(candidates) < len(labels) else str(len(candidates) + 1)
+                candidates.append(cand)
+            if len(candidates) >= 4:
+                break
+
+        best_candidate = candidates[0]
+        best_x = best_candidate['x']
+        best_y = best_candidate['y']
+        overlay_w = best_candidate['width']
+        overlay_h = best_candidate['height']
+        min_energy = best_candidate['avg_energy'] * (overlay_w * overlay_h)
+
         if self.enable_print_layout and candidates:
             pretty = ", ".join(
-                f"{cand['label']}@({cand['x']},{cand['y']},{cand['width']}x{cand['height']}) e={cand['energy']:.4f}"
+                f"{cand['label']}@({cand['x']},{cand['y']},{cand['width']}x{cand['height']}) avg={cand['avg_energy']:.4f} area={cand['area_ratio']:.3f}"
                 for cand in candidates
             )
             print(f"      [Layout/candidates] {pretty}")
         if candidates and self.placement_judge and self.placement_judge.available():
-            judge_frame = frames[len(frames) // 2]
-            chosen = self.placement_judge.choose(judge_frame, candidates, content_type)
+            chosen = self.placement_judge.choose(frames, candidates, content_type)
             if chosen:
                 if chosen.get('judge_reason'):
                     print(f"      [PlacementJudge] {chosen.get('label', '?')} adjusted -> ({chosen['x']}, {chosen['y']}) | {chosen['judge_reason']}")
-                best_x, best_y, min_energy = chosen['x'], chosen['y'], chosen['energy']
+                best_x, best_y = chosen['x'], chosen['y']
+                overlay_w, overlay_h = chosen['width'], chosen['height']
+                min_energy = chosen.get('avg_energy', chosen.get('energy', 0.0)) * (overlay_w * overlay_h)
         
         # 4. 判断是否可放置（单点均值能量阈值例如 >0.15 则认为过于拥挤）
         avg_energy = min_energy / (overlay_w * overlay_h)
-        if avg_energy > 0.15:
+        if avg_energy > 0.21:
             # 空间严重不足，尝试降级
             if content_type == 'svg':
                 print(f"      [!] 空间不足放置 {overlay_w}x{overlay_h} SVG. 尝试降级为较小的文字卡片.")
@@ -324,32 +401,68 @@ class LayoutProcessor:
             occupancy = self._estimate_visual_occupancy(frame)
             self._debug(f"      [Layout/occupancy] type={content_type} occupancy={occupancy:.3f}")
             scale = 1.0
-            if occupancy > 0.36:
-                scale = 0.72
-            elif occupancy > 0.27:
-                scale = 0.82
-            elif occupancy > 0.20:
+            if occupancy > 0.48:
                 scale = 0.90
+            elif occupancy > 0.36:
+                scale = 1.0
+            elif occupancy < 0.20:
+                scale = 1.18
 
             if content_type == 'svg':
-                min_w, min_h = 420, 236
+                min_w, min_h = 580, 326
             elif content_type == 'mechanism_chain':
-                min_w, min_h = 420, 180
+                min_w, min_h = 560, 224
             elif content_type == 'misconception':
-                min_w, min_h = 320, 180
+                min_w, min_h = 400, 216
             else:
                 if content_type in ('text', 'text_card'):
-                    min_w, min_h = 360, 210
+                    min_w, min_h = 460, 258
                 else:
                     min_w, min_h = 280, 160
 
             scaled_w = max(min_w, int(overlay_w * scale))
             scaled_h = max(min_h, int(overlay_h * scale))
-            scaled_w = min(scaled_w, int(w * 0.52))
-            scaled_h = min(scaled_h, int(h * 0.42))
+            scaled_w = min(scaled_w, int(w * 0.78))
+            scaled_h = min(scaled_h, int(h * 0.64))
             return scaled_w, scaled_h
         except Exception:
             return overlay_w, overlay_h
+
+    def _build_size_variants(self, frames: List, overlay_w: int, overlay_h: int, content_type: str) -> List[Tuple[int, int]]:
+        """围绕当前尺寸构造多组候选大小，优先尝试更大的安全区域。"""
+        try:
+            frame = frames[len(frames) // 2]
+            h, w = frame.shape[:2]
+            occupancy = self._estimate_visual_occupancy(frame)
+            if content_type == 'svg':
+                scales = [1.48, 1.32, 1.18, 1.06, 1.0, 0.90]
+            elif content_type in ('text', 'text_card'):
+                scales = [1.32, 1.18, 1.06, 1.0, 0.90]
+            else:
+                scales = [1.26, 1.12, 1.0, 0.90]
+
+            if occupancy > 0.46:
+                scales = [1.16, 1.04, 0.94, 0.86]
+            elif occupancy < 0.20:
+                scales = [1.60, 1.42, 1.24, 1.10, 1.0, 0.90]
+
+            min_w = 500 if content_type == 'svg' else 380
+            min_h = 280 if content_type == 'svg' else 210
+            max_w = int(w * (0.84 if content_type == 'svg' else 0.72))
+            max_h = int(h * (0.68 if content_type == 'svg' else 0.56))
+
+            variants = []
+            seen = set()
+            for scale in scales:
+                cand_w = max(min_w, min(max_w, int(round(overlay_w * scale))))
+                cand_h = max(min_h, min(max_h, int(round(overlay_h * scale))))
+                key = (cand_w, cand_h)
+                if key not in seen:
+                    seen.add(key)
+                    variants.append(key)
+            return variants or [(overlay_w, overlay_h)]
+        except Exception:
+            return [(overlay_w, overlay_h)]
 
     def _map_enhancement_to_content_type(self, enhancement_type: str) -> str:
         if enhancement_type == 'svg':
@@ -361,9 +474,9 @@ class LayoutProcessor:
         h, w = frame.shape[:2]
         energy = np.zeros((h, w), dtype=np.float32)
         
-        # 1. Subtitle Area Block (绝对红线区: 底部 15%)
+        # 1. Subtitle Area Block (仅保留中等约束，不再视为绝对禁区)
         subtitle_h = int(h * 0.85)
-        energy[subtitle_h:, :] = 1.0
+        energy[subtitle_h:, :] = 0.45
         
         # 2. Face Detection Penalty (严格人脸避让)
         faces = self._detect_faces(frame)
@@ -375,28 +488,28 @@ class LayoutProcessor:
             start_x, end_x = max(0, fx - expand_w), min(w, fx + fw + expand_w)
             start_y, end_y = max(0, fy - expand_h), min(h, fy + fh + expand_h)
             energy[start_y:end_y, start_x:end_x] = np.maximum(
-                energy[start_y:end_y, start_x:end_x], 0.95
+                energy[start_y:end_y, start_x:end_x], 0.98
             )
 
-        # 3. Center Penalty (避开中心绝对视线焦点区域)
+        # 3. Center Penalty (明显减弱，只做很轻的参考)
         center_x, center_y = w // 2, h // 2
         max_dist = np.sqrt(center_x**2 + center_y**2)
         
         # 生成基于距离的中心引力网格
         y_grid, x_grid = np.ogrid[:h, :w]
         dist_from_center = np.sqrt((x_grid - center_x)**2 + (y_grid - center_y)**2)
-        center_penalty = np.clip(1.0 - (dist_from_center / (max_dist * 0.5)), 0, 0.4)
+        center_penalty = np.clip(1.0 - (dist_from_center / (max_dist * 0.42)), 0, 0.10)
         energy = np.maximum(energy, center_penalty)
 
-        # 4. Structural Lines Penalty (桌面边缘、麦克风支架、几何边界等)
+        # 4. Structural Lines Penalty (弱参考，不再强避让)
         line_map = self._detect_structural_lines(frame)
         if line_map is not None:
-            energy = np.maximum(energy, line_map * 0.52)
+            energy = np.maximum(energy, line_map * 0.14)
 
-        # 5. Saliency Map Penalty (显著性物体/色块避让)
+        # 5. Saliency Map Penalty (弱参考，不再把显著区域当强禁区)
         saliency_map = self._detect_saliency(frame)
         if saliency_map is not None:
-            energy = np.maximum(energy, saliency_map * 0.6)
+            energy = np.maximum(energy, saliency_map * 0.16)
             
         return energy
 
@@ -415,7 +528,7 @@ class LayoutProcessor:
             line_map = self._detect_structural_lines(frame)
             line_occ = float(np.mean(line_map > 0.18)) if line_map is not None else 0.0
 
-            occupancy = 0.52 * saliency_occ + 0.28 * line_occ + 2.6 * face_area
+            occupancy = 0.16 * saliency_occ + 0.08 * line_occ + 3.6 * face_area
             return float(min(1.0, max(0.0, occupancy)))
         except Exception:
             return 0.0
@@ -428,8 +541,8 @@ class LayoutProcessor:
         integral = cv2.integral(combined_energy)
         h, w = combined_energy.shape
 
-        margin_x = min(self.safe_margin_x, max(24, (w - overlay_w) // 4 if w > overlay_w else 24))
-        margin_y = min(self.safe_margin_y, max(24, (h - overlay_h) // 4 if h > overlay_h else 24))
+        margin_x = min(self.safe_margin_x, max(10, (w - overlay_w) // 8 if w > overlay_w else 10))
+        margin_y = min(self.safe_margin_y, max(10, (h - overlay_h) // 8 if h > overlay_h else 10))
 
         x_start = max(0, margin_x)
         y_start = max(0, margin_y)
@@ -457,17 +570,21 @@ class LayoutProcessor:
                 edge_dy = min(y, h - (y + overlay_h))
                 edge_penalty = 0.0
                 if edge_dx < margin_x:
-                    edge_penalty += 0.22 * (1.0 - edge_dx / max(1.0, margin_x))
+                    edge_penalty += 0.08 * (1.0 - edge_dx / max(1.0, margin_x))
                 if edge_dy < margin_y:
-                    edge_penalty += 0.26 * (1.0 - edge_dy / max(1.0, margin_y))
+                    edge_penalty += 0.10 * (1.0 - edge_dy / max(1.0, margin_y))
 
-                vertical_target = 0.42 * h
-                vertical_penalty = 0.08 * abs(cy - vertical_target) / max(1.0, h)
+                vertical_target = 0.48 * h
+                vertical_penalty = 0.07 * abs(cy - vertical_target) / max(1.0, h)
+                right_lower_preference = (
+                    -0.020 * max(0.0, (cx / max(1.0, w)) - 0.56)
+                    -0.010 * max(0.0, (cy / max(1.0, h)) - 0.46)
+                )
 
                 near_corner = (x < margin_x * 1.25 and y < margin_y * 1.25) or (x > w - overlay_w - margin_x * 1.25 and y < margin_y * 1.25) or (x < margin_x * 1.25 and y > h - overlay_h - margin_y * 1.25) or (x > w - overlay_w - margin_x * 1.25 and y > h - overlay_h - margin_y * 1.25)
-                corner_penalty = 0.12 if near_corner else 0.0
+                corner_penalty = 0.04 if near_corner else 0.0
 
-                total_energy = float(window_energy + edge_penalty + vertical_penalty + corner_penalty)
+                total_energy = float(window_energy + edge_penalty + vertical_penalty + corner_penalty + right_lower_preference)
                 if total_energy < best_energy:
                     best_energy = total_energy
                     best_x = x
@@ -485,8 +602,8 @@ class LayoutProcessor:
     ) -> List[Dict[str, float]]:
         integral = cv2.integral(combined_energy)
         h, w = combined_energy.shape
-        margin_x = min(self.safe_margin_x, max(24, (w - overlay_w) // 4 if w > overlay_w else 24))
-        margin_y = min(self.safe_margin_y, max(24, (h - overlay_h) // 4 if h > overlay_h else 24))
+        margin_x = min(self.safe_margin_x, max(10, (w - overlay_w) // 8 if w > overlay_w else 10))
+        margin_y = min(self.safe_margin_y, max(10, (h - overlay_h) // 8 if h > overlay_h else 10))
         x_start = max(0, margin_x)
         y_start = max(0, margin_y)
         x_end = max(x_start, w - overlay_w - margin_x)
@@ -503,15 +620,29 @@ class LayoutProcessor:
                 edge_dy = min(y, h - (y + overlay_h))
                 edge_penalty = 0.0
                 if edge_dx < margin_x:
-                    edge_penalty += 0.22 * (1.0 - edge_dx / max(1.0, margin_x))
+                    edge_penalty += 0.08 * (1.0 - edge_dx / max(1.0, margin_x))
                 if edge_dy < margin_y:
-                    edge_penalty += 0.26 * (1.0 - edge_dy / max(1.0, margin_y))
+                    edge_penalty += 0.10 * (1.0 - edge_dy / max(1.0, margin_y))
                 total_energy = float(window_energy + edge_penalty)
-                scored.append({'x': x, 'y': y, 'width': overlay_w, 'height': overlay_h, 'energy': total_energy})
+                scored.append({
+                    'x': x,
+                    'y': y,
+                    'width': overlay_w,
+                    'height': overlay_h,
+                    'energy': total_energy,
+                    'avg_energy': float(window_energy),
+                    'area_ratio': float((overlay_w * overlay_h) / max(1.0, w * h)),
+                    'score': total_energy,
+                })
         for cand in scored:
             cy = cand['y'] + overlay_h / 2.0
-            vertical_target = 0.42 * h
-            cand['energy'] += 0.06 * abs(cy - vertical_target) / max(1.0, h)
+            cx = cand['x'] + overlay_w / 2.0
+            vertical_target = 0.48 * h
+            cand['score'] += 0.05 * abs(cy - vertical_target) / max(1.0, h)
+            cand['score'] += (
+                -0.020 * max(0.0, (cx / max(1.0, w)) - 0.56)
+                -0.010 * max(0.0, (cy / max(1.0, h)) - 0.46)
+            )
             near_corner = (
                 (cand['x'] < margin_x * 1.25 and cand['y'] < margin_y * 1.25) or
                 (cand['x'] > w - overlay_w - margin_x * 1.25 and cand['y'] < margin_y * 1.25) or
@@ -519,18 +650,16 @@ class LayoutProcessor:
                 (cand['x'] > w - overlay_w - margin_x * 1.25 and cand['y'] > h - overlay_h - margin_y * 1.25)
             )
             if near_corner:
-                cand['energy'] += 0.08
+                cand['score'] += 0.03
 
-        scored.sort(key=lambda item: item['energy'])
+        scored.sort(key=lambda item: (item['avg_energy'], item['score']))
         selected = []
-        labels = ['A', 'B', 'C', 'D']
         for cand in scored:
             if all(
                 abs((cand['x'] + overlay_w / 2.0) - (s['x'] + overlay_w / 2.0)) > overlay_w * 0.55 or
                 abs((cand['y'] + overlay_h / 2.0) - (s['y'] + overlay_h / 2.0)) > overlay_h * 0.45
                 for s in selected
             ):
-                cand['label'] = labels[len(selected)] if len(selected) < len(labels) else str(len(selected)+1)
                 selected.append(cand)
             if len(selected) >= top_k:
                 break
@@ -624,11 +753,27 @@ class LayoutProcessor:
     def _detect_faces(self, frame):
         """人脸检测"""
         try:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = self._face_cascade.detectMultiScale(gray, 1.3, 5)
-            return [{'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h)} 
-                   for (x, y, w, h) in faces]
-        except:
+            if self._face_detector is None:
+                return []
+            h, w = frame.shape[:2]
+            self._face_detector.setInputSize((w, h))
+            _, detections = self._face_detector.detect(frame)
+            if detections is None:
+                return []
+            faces = []
+            for det in detections:
+                x, y, fw, fh = det[:4]
+                confidence = float(det[-1]) if len(det) > 14 else 1.0
+                if confidence < 0.72:
+                    continue
+                faces.append({
+                    'x': int(max(0, x)),
+                    'y': int(max(0, y)),
+                    'w': int(max(1, fw)),
+                    'h': int(max(1, fh)),
+                })
+            return faces
+        except Exception:
             return []
     
 
@@ -787,12 +932,15 @@ class LayoutProcessor:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(layouts, f, ensure_ascii=False, indent=2)
     
-    def _load_cached_layouts(self, decisions: List[Dict], filepath: str) -> List[Dict]:
+    def _load_cached_layouts(self, decisions: List[Dict], filepath: str) -> List[Dict] | None:
         """加载缓存的布局"""
         import json
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 cached_layouts = json.load(f)
+
+            if not self._is_layout_cache_compatible(decisions, cached_layouts):
+                return None
 
             layout_map = {item['timestamp']: item['layout'] for item in cached_layouts}
             if self.enable_print_layout:
@@ -834,6 +982,9 @@ class LayoutProcessor:
                     'metadata': {
                         'start': dec['start'],
                         'end': dec['end'],
+                        'original_start': dec.get('original_start', dec['start']),
+                        'original_end': dec.get('original_end', dec['end']),
+                        'placement_window': dec.get('placement_window', {}),
                         'confusion_risk': dec.get('confusion_risk'),
                         'misconception_payload': dec.get('misconception_payload'),
                         'mechanism_payload': dec.get('mechanism_payload'),
@@ -863,6 +1014,9 @@ class LayoutProcessor:
                 'metadata': {
                     'start': dec['start'],
                     'end': dec['end'],
+                    'original_start': dec.get('original_start', dec['start']),
+                    'original_end': dec.get('original_end', dec['end']),
+                    'placement_window': dec.get('placement_window', {}),
                     'confusion_risk': dec.get('confusion_risk'),
                     'misconception_payload': dec.get('misconception_payload'),
                     'mechanism_payload': dec.get('mechanism_payload'),
@@ -872,3 +1026,16 @@ class LayoutProcessor:
                     'animation_reason': dec.get('animation_reason', ''),
                 }
             } for dec in decisions if dec['enhancement_type'] != 'none']
+
+    def _is_layout_cache_compatible(self, decisions: List[Dict], cached_layouts: List[Dict]) -> bool:
+        expected = [dec for dec in decisions if dec['enhancement_type'] != 'none']
+        if len(expected) != len(cached_layouts):
+            return False
+        for dec, cached in zip(expected, cached_layouts):
+            if abs(float(cached.get('timestamp', -1.0)) - float(dec['start'])) > 1e-3:
+                return False
+            if abs(float(cached.get('end', -1.0)) - float(dec['end'])) > 1e-3:
+                return False
+            if cached.get('text', '') != dec.get('text', ''):
+                return False
+        return True

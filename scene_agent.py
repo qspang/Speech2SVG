@@ -56,6 +56,23 @@ class SceneAgent:
                         scene_info = cached_data
                         cache_valid = True
                         cache_complete = len(scene_info) >= len(enhancement_points)
+                        valid_indices = {}
+                        for idx, point in enumerate(enhancement_points):
+                            cached_entry = scene_info.get(str(idx))
+                            if not cached_entry:
+                                cache_complete = False
+                                continue
+                            cached_range = cached_entry.get("time_range", {})
+                            expected_start = round(float(point["timestamp"]), 3)
+                            expected_end = round(float(point["timestamp"] + point["duration"]), 3)
+                            if (
+                                abs(float(cached_range.get("start", -1.0)) - expected_start) <= 1e-3
+                                and abs(float(cached_range.get("end", -1.0)) - expected_end) <= 1e-3
+                            ):
+                                valid_indices[str(idx)] = cached_entry
+                            else:
+                                cache_complete = False
+                        scene_info = valid_indices
                         if cache_complete:
                             print(f"  > Cache is up-to-date. Loading.")
                         else:
@@ -199,6 +216,10 @@ class SceneAgent:
             
             return {
                 'is_single_scene': is_single_scene,
+                'time_range': {
+                    'start': round(float(start_time), 3),
+                    'end': round(float(end_time), 3),
+                },
                 'color_hierarchy': color_hierarchy,
                 'color_metrics': color_metrics,
                 'visual_complexity': visual_complexity,

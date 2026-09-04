@@ -1,0 +1,12 @@
+# Local/generated folders excluded from pushes
+compare/
+models/
+ossrecord/
+userstudy/
+__pycache__/
+**/__pycache__/
+
+# Local notes, scripts, archives, and other artifacts
+*.txt
+*.sh
+*.zip

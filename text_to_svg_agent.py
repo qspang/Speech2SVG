@@ -42,35 +42,53 @@ class TextToSVGAgent:
         payload: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         payload = payload or {}
-        width = int(layout_info.get("width", CANVAS_WIDTH))
-        height = int(layout_info.get("height", CANVAS_HEIGHT))
+        target_width = int(layout_info.get("width", CANVAS_WIDTH))
+        target_height = int(layout_info.get("height", CANVAS_HEIGHT))
+        width, height = self._resolve_render_canvas(target_width, target_height)
         copy_pack = self._prepare_copy(transcript, payload, mode)
+        title = copy_pack.get("headline") or self._derive_title(transcript, payload, mode)
+        subtitle = copy_pack.get("support") or self._derive_subtitle(transcript, payload, mode)
 
         try:
-            svg = self._compose_typographic_svg(
+            system_prompt = self._build_system_prompt(mode, scene_info, width, height)
+            user_prompt = self._build_prompt(
+                transcript=transcript,
                 scene_info=scene_info,
-                width=width,
-                height=height,
+                layout_info=layout_info,
                 mode=mode,
                 payload=payload,
+                width=width,
+                height=height,
+                target_width=target_width,
+                target_height=target_height,
                 copy_pack=copy_pack,
             )
+            result = self.llm._generate(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_prompt),
+                ]
+            )
+            raw = result.generations[0].message.content
+            svg = self._extract_svg(raw)
+            if "<svg" not in svg or "</svg>" not in svg:
+                raise ValueError("LLM did not return valid SVG markup")
             svg, validation = validate_and_fix(svg)
             return {
                 "svg_content": svg,
                 "validation": validation,
-                "title": copy_pack.get("headline") or self._derive_title(transcript, payload, mode),
-                "subtitle": copy_pack.get("support") or self._derive_subtitle(transcript, payload, mode),
+                "title": title,
+                "subtitle": subtitle,
             }
         except Exception as e:
-            print(f"      TextToSVGAgent compose failed: {e}")
+            print(f"      TextToSVGAgent llm layout failed: {e}")
             fallback = self._fallback_svg(transcript, scene_info, width, height, mode, payload)
             fallback, validation = validate_and_fix(fallback)
             return {
                 "svg_content": fallback,
                 "validation": validation,
-                "title": copy_pack.get("headline") or self._derive_title(transcript, payload, mode),
-                "subtitle": copy_pack.get("support") or self._derive_subtitle(transcript, payload, mode),
+                "title": title,
+                "subtitle": subtitle,
             }
 
     def _build_system_prompt(
@@ -84,18 +102,22 @@ class TextToSVGAgent:
         primary = design.get("recommended_accent", "#4f7cac")
         secondary = design.get("recommended_secondary", "#9fc2e4")
         text_color = design.get("recommended_text", "#f7fbff")
-        bg_color = design.get("recommended_bg", "#122238")
-        border_color = design.get("recommended_border", bg_color)
-        bg_opacity = design.get("svg_bg_opacity", 0.86)
-        bg_color = design.get("recommended_bg", "#122238")
-        border_color = design.get("recommended_border", bg_color)
-        bg_opacity = design.get("svg_bg_opacity", 0.86)
+        bg_color = design.get("recommended_bg", "none")
+        border_color = design.get("recommended_border", "none")
+        bg_opacity = design.get("svg_bg_opacity", 0.0)
+        bg_color = design.get("recommended_bg", "none")
+        border_color = design.get("recommended_border", "none")
+        bg_opacity = design.get("svg_bg_opacity", 0.0)
 
         role_line = (
             "Create a mechanism-oriented typographic SVG."
             if mode == "mechanism"
             else "Create a knowledge-note typographic SVG."
         )
+
+        min_title = max(34, min(92, int(width * 0.064)))
+        min_support = max(28, min(52, int(width * 0.038)))
+        min_secondary = max(24, min(44, int(width * 0.032)))
 
         return f"""You are an expert SVG typographic designer for video overlays.
 Canvas: {width}x{height}.
@@ -107,29 +129,37 @@ Hard requirements:
 1. This SVG must stay text-first. The content inside the SVG should be coherent text blocks, not isolated words.
 2. Do NOT turn the text into node graphs, flowchart boxes, entity diagrams, icon maps, fake dashboards, or scattered decorative labels.
 3. Do NOT invent entities, categories, slogans, or condensed phrases that are not grounded in the transcript.
-4. First summarize the transcript into one clear takeaway, then express it as a strong headline plus one or two complete supporting sentences.
+4. First summarize the transcript into one clear takeaway, then express it as a strong headline plus exactly one complete supporting sentence for normal text mode.
 5. The wording must be semantically complete and easy to understand at a glance. Avoid fragmentary subtitles like "PLAY -> UNDERSTAND" or mysterious one-word labels.
-6. Typography must be LARGE and video-legible. Make the main headline dominant, the support line clearly readable, and avoid tiny annotation text.
-7. The primary text should occupy a substantial part of the canvas. Prefer fewer text blocks with larger font sizes over many small lines.
+6. Typography must be LARGE and video-legible. Decide the font sizes first, then design the composition around them.
+7. Minimum font sizes:
+   - headline: at least {min_title}px
+   - support: at least {min_support}px
+   - secondary: at least {min_secondary}px if used
+8. The primary text should occupy a substantial part of the canvas. Prefer fewer text blocks with larger font sizes over many small lines.
+9. Use the available width intentionally. Do not compress all text into a narrow left column when the right side has space.
+10. Balance the whitespace above, below, left, and right. Avoid huge empty right margins or a subtitle stuck to the bottom border.
 8. Keep animation very restrained: gentle fade-in, underline reveal, or subtle emphasis only. No blinking dots, no floating particles, no unrelated ornaments.
 9. If you draw an underline or divider, its length must align cleanly with the associated text block. Do not use broken or mismatched underline lengths.
-10. Draw a visible background plate behind the typography. The background must not be transparent.
-11. Draw a clearly visible border so the overlay edge is separated from the video.
-12. For text/mechanism overlays, use a solid, non-transparent background and a visible border in the same color family.
+10. The overall panel background must stay transparent so the video remains visible.
+11. Choose text and accent colors that remain clearly readable on the local video region.
+12. Do not make the text, underline, or any key decorative mark blend into the underlying local region. If uncertain, prefer white or near-white text.
 13. Use this palette:
-   - background: {bg_color} (opacity {bg_opacity})
-   - border: {border_color}
+   - background: transparent
+   - border: none unless absolutely necessary
    - primary accent: {primary}
    - secondary accent: {secondary}
    - text: {text_color}
-14. Make the SVG elegant and legible. Favor 2-3 textual regions max.
+14. Make the SVG elegant and legible. For normal text mode, use exactly 1 or 2 text regions only. Never create 3 separate text regions.
 15. Avoid poster-like category labels such as INSIGHT, NOTE, OBSERVATION unless they are absolutely necessary. Usually omit them.
 16. Use short complete sentences and clear meaning instead of dense paragraphs.
 17. Prefer a conclusion-and-explanation layout:
    - one dominant conclusion line
    - one supporting explanation sentence
-   - optional one secondary line
+   - no third paragraph unless absolutely unavoidable
 18. For mechanism mode, use a clear title followed by 2-4 aligned textual stage rows. Do not create abstract slogans.
+19. If you use color emphasis, highlight only one short key phrase (usually 1-3 words) with the provided accent color. Keep the rest of the text in the main text color.
+20. For normal text mode, never create split columns, left/right mini paragraphs, footer notes, side notes, or a third bottom text band.
 
 Avoid:
 - generic box-and-arrow diagrams
@@ -151,6 +181,8 @@ Return raw SVG only, starting with <svg> and ending with </svg>."""
         payload: Dict[str, Any],
         width: int,
         height: int,
+        target_width: int,
+        target_height: int,
         copy_pack: Dict[str, str],
     ) -> str:
         region_context = layout_info.get("region_context", {})
@@ -171,7 +203,7 @@ Return raw SVG only, starting with <svg> and ending with </svg>."""
             support = ""
             mode_brief = (
                 "Present the idea as a concise explanatory note. "
-                "Favor one clear conclusion line, one readable explanation sentence, and at most one secondary sentence."
+                "Use one headline and one supporting sentence only. No third text block, no split columns, and no footer note."
             )
 
         return f"""Transcript:
@@ -190,7 +222,8 @@ Optional support content:
 
 Layout constraints:
 - preferred position: {position}
-- target area: {width}x{height}
+- target area on video: {target_width}x{target_height}
+- generate on an enlarged internal canvas: {width}x{height}
 - region context: {region_context}
 
 Scene/style hint:
@@ -201,20 +234,39 @@ Create a polished SVG overlay that visualizes this content using text compositio
 {mode_brief}
 
 Guidance:
+- Highest priority: every prepared text block must be fully visible inside the SVG. No truncation, no clipping, no text outside the canvas, and no hidden last words.
+- Use the prepared copy completely. Do not omit the end of the headline or silently drop words from support/secondary.
 - Keep the wording faithful to the transcript, but compress it into a clearer takeaway.
 - Extract the central meaning first, instead of copying broken subtitle fragments.
-- Use 2-3 textual regions max.
-- Prefer 1 strong title + 1 complete supporting sentence + 1 optional secondary sentence. Use the prepared copy as the semantic source of truth.
+- Prefer 1 text block or 2 text blocks max.
+- Prefer exactly 1 strong title + 1 complete supporting sentence for normal text mode. Do not add a third paragraph.
 - The title should feel bold and oversized on screen.
+- Before placing elements, decide workable font sizes for headline/support/secondary and keep them large enough for video playback.
+- If two font sizes are used, keep them relatively close. The smaller text should still feel large on screen, not tiny caption text.
+- If the title is long, reduce the font size moderately and add lines rather than clipping the text.
+- Keep safe inner margins on all four sides so thick glyphs are not cut off by the viewBox boundary.
 - Let text occupy more of the canvas; avoid leaving too much empty space around tiny typography.
+- Use the full composition width when appropriate. If a line can safely be longer, do not force it into a narrow column.
+- Make the text block proportions feel balanced inside the given canvas, with no giant empty right side and no text pressed against the bottom border.
 - Use calm academic composition, not slogan-like poster language.
 - Omit category tags like INSIGHT / NOTE unless absolutely necessary.
 - Add only subtle animation: fade-in, underline reveal, or soft emphasis.
 - Any underline must be aligned to the text width and should not appear broken or detached.
 - Do not add unrelated dots or tiny decorative marks.
-- Make it suitable as a video overlay, using the provided background and border colors instead of a transparent plate.
+- Make it suitable as a video overlay with a transparent background. Use the provided text and accent colors so the typography stays visible over the local video region.
+- Use the accent color sparingly on one short emphasis phrase when it strengthens the meaning, instead of making every word white.
+- Never place two small paragraphs side by side at the bottom. Do not create bottom-left and bottom-right text groups.
+- Never add footer notes, micro annotations, or a third explanatory line in normal text mode.
 
 Return raw SVG only."""
+
+    def _resolve_render_canvas(self, target_width: int, target_height: int) -> tuple[int, int]:
+        target_width = max(320, int(target_width))
+        target_height = max(180, int(target_height))
+        scale = max(1.0, 1400.0 / target_width, 800.0 / target_height)
+        render_width = int(round(target_width * scale))
+        render_height = int(round(target_height * scale))
+        return render_width, render_height
 
     def _extract_svg(self, text: str) -> str:
         if "```svg" in text:
@@ -241,8 +293,8 @@ Return raw SVG only."""
         primary = design.get("recommended_accent", "#4f7cac")
         secondary = design.get("recommended_secondary", "#9fc2e4")
         text_color = design.get("recommended_text", "#f7fbff")
-        bg_color = design.get("recommended_bg", "#122238")
-        border_color = design.get("recommended_border", bg_color)
+        bg_color = design.get("recommended_bg", "none")
+        border_color = design.get("recommended_border", "none")
 
         title = copy_pack.get("headline", "")
         support = copy_pack.get("support", "")
@@ -257,28 +309,26 @@ Return raw SVG only."""
         plate_w = width
         plate_h = height
         corner_radius = max(20, int(min(width, height) * 0.09))
-        inset_x = max(8, int(width * 0.018))
-        inset_y = max(8, int(height * 0.03))
-        pad_x = max(28, int(plate_w * (0.10 if compact else 0.08)))
-        pad_top = max(28, int(plate_h * (0.16 if compact else 0.14)))
-        pad_bottom = max(24, int(plate_h * (0.14 if compact else 0.12)))
+        pad_x = max(20, int(plate_w * (0.072 if compact else 0.062)))
+        pad_top_min = max(20, int(plate_h * (0.09 if compact else 0.08)))
+        pad_bottom_min = max(22, int(plate_h * (0.10 if compact else 0.09)))
 
         x = plate_x + pad_x
-        top = plate_y + pad_top
+        top = plate_y + pad_top_min
         title_max_width = max(160, plate_w - 2 * pad_x)
         support_max_width = title_max_width
 
-        title_fs = max(22, min(64, int(width * (0.105 if compact else 0.070))))
-        max_title_lines = 4 if compact else 3
+        title_fs = max(20, min(58, int(width * (0.095 if compact else 0.064))))
+        max_title_lines = 4
         title_lines = self._wrap_text(title, title_max_width, title_fs, max_lines=max_title_lines)
         while (len(title_lines) > max_title_lines or self._estimate_block_height(title_fs, len(title_lines)) > int(plate_h * 0.40)) and title_fs > 20:
             title_fs -= 3
             title_lines = self._wrap_text(title, title_max_width, title_fs, max_lines=max_title_lines)
 
-        support_fs = max(14, min(28, int(width * (0.048 if compact else 0.030))))
-        support_lines = self._wrap_text(support, support_max_width, support_fs, max_lines=3)
+        support_fs = max(13, min(24, int(width * (0.043 if compact else 0.028))))
+        support_lines = self._wrap_text(support, support_max_width, support_fs, max_lines=4)
 
-        secondary_fs = max(12, min(20, int(width * (0.038 if compact else 0.022))))
+        secondary_fs = max(11, min(18, int(width * (0.034 if compact else 0.020))))
         secondary_lines = self._wrap_text(secondary_copy, support_max_width, secondary_fs, max_lines=2) if secondary_copy else []
 
         stage_fs = max(16, min(24, int(width * 0.040)))
@@ -292,10 +342,10 @@ Return raw SVG only."""
 
         def _fit_text_mode():
             nonlocal title_fs, support_fs, secondary_fs, title_lines, support_lines, secondary_lines
-            available = plate_h - pad_top - pad_bottom
-            while title_fs > 18:
+            available = plate_h - pad_top_min - pad_bottom_min
+            while title_fs > 16:
                 title_lines = self._wrap_text(title, title_max_width, title_fs, max_lines=max_title_lines)
-                support_lines = self._wrap_text(support, support_max_width, support_fs, max_lines=3) if support else []
+                support_lines = self._wrap_text(support, support_max_width, support_fs, max_lines=4) if support else []
                 secondary_lines = self._wrap_text(secondary_copy, support_max_width, secondary_fs, max_lines=2) if secondary_copy else []
                 total = (
                     len(title_lines) * int(title_fs * 1.04) +
@@ -306,15 +356,15 @@ Return raw SVG only."""
                 )
                 if total <= available:
                     break
-                title_fs -= 3
-                support_fs = max(14, support_fs - 2)
-                secondary_fs = max(12, secondary_fs - 2)
-            if title_fs <= 18 and secondary_lines:
+                title_fs -= 2
+                support_fs = max(12, support_fs - 1)
+                secondary_fs = max(10, secondary_fs - 1)
+            if title_fs <= 16 and secondary_lines:
                 secondary_lines = []
 
         def _fit_mechanism_mode():
             nonlocal title_fs, stage_fs, title_lines
-            available = plate_h - pad_top - pad_bottom
+            available = plate_h - pad_top_min - pad_bottom_min
             row_h = max(40, int(plate_h * 0.17))
             while title_fs > 18:
                 title_lines = self._wrap_text(title, title_max_width, title_fs, max_lines=max_title_lines)
@@ -364,6 +414,22 @@ Return raw SVG only."""
             support_line_h = int(support_fs * 1.22)
             secondary_line_h = int(secondary_fs * 1.22)
             title_w = min(title_max_width, int(max(len(line) for line in title_lines or [title]) * max(16, title_fs * 0.52)))
+            text_block_total = (
+                title_line_h * max(1, len(title_lines)) +
+                title_gap +
+                (line_gap + 2 if support_lines else 0) +
+                support_line_h * max(1, len(support_lines)) +
+                (support_gap if secondary_lines else 0) +
+                secondary_line_h * max(1, len(secondary_lines))
+            )
+            available_top = max(
+                pad_top_min,
+                min(
+                    plate_h - pad_bottom_min - text_block_total,
+                    int((plate_h - text_block_total) * 0.42)
+                )
+            )
+            top = available_top
             title_block_height = title_line_h * max(1, len(title_lines))
             divider_y = top + title_block_height + title_gap
             support_y = divider_y + line_gap + 2
@@ -389,7 +455,7 @@ Return raw SVG only."""
                 extra='opacity="0.92" class="fade-in body-text secondary-text" style="animation-delay:0.32s"'
             ) if secondary_lines else ""
 
-        divider_w = max(72, min(title_max_width, int(title_w * 0.72)))
+        divider_w = max(72, min(title_max_width, int(title_w * 0.68)))
 
         return f"""<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -404,8 +470,6 @@ Return raw SVG only."""
     </style>
   </defs>
   <g>
-    <rect x="{plate_x}" y="{plate_y}" width="{plate_w}" height="{plate_h}" rx="{corner_radius}" fill="{bg_color}" fill-opacity="1" stroke="{border_color}" stroke-width="6" />
-    <rect x="{inset_x}" y="{inset_y}" width="{max(0, width - inset_x * 2)}" height="{max(0, height - inset_y * 2)}" rx="{max(14, corner_radius - 10)}" fill="none" stroke="{primary}" stroke-opacity="0.22" stroke-width="1.6" />
     {self._build_multiline_text(x, top + 24, title_fs, title_line_h, title_lines, text_color, '800', extra='class="fade-in title-text"')}
     <line x1="{x}" y1="{divider_y}" x2="{x + divider_w}" y2="{divider_y}" stroke="{primary}" stroke-width="2.6" stroke-linecap="round" class="sweep-line" />
     {support_block}
@@ -420,29 +484,66 @@ Return raw SVG only."""
         words = text.split()
         if not words:
             return [text]
-        lines: list[str] = []
-        current = words[0]
-        char_px = max(10.0, font_size * 0.56)
-        capacity = max(8, int(max_width / char_px))
-        for word in words[1:]:
-            candidate = f"{current} {word}"
-            if len(candidate) <= capacity:
-                current = candidate
-            else:
-                lines.append(current)
-                current = word
-                if len(lines) == max_lines - 1:
+        char_px = max(8.5, font_size * 0.525)
+        line_limit_px = max_width
+
+        from functools import lru_cache
+
+        def line_width(candidate_words: list[str]) -> float:
+            candidate = " ".join(candidate_words)
+            return max(1.0, len(candidate) * char_px)
+
+        @lru_cache(maxsize=None)
+        def solve(index: int, lines_left: int):
+            if index >= len(words):
+                return 0.0, []
+            if lines_left <= 1:
+                tail_words = list(words[index:])
+                tail = " ".join(tail_words)
+                width_px = line_width(tail_words)
+                overflow = max(0.0, width_px - line_limit_px)
+                fill_ratio = min(1.25, width_px / max(1.0, line_limit_px))
+                penalty = overflow * 1000.0 + abs(0.92 - fill_ratio) * 120.0
+                return penalty, [tail]
+
+            best_score = float("inf")
+            best_lines: list[str] = []
+            current_words: list[str] = []
+
+            for end in range(index, len(words)):
+                current_words.append(words[end])
+                width_px = line_width(current_words)
+                overflow = max(0.0, width_px - line_limit_px)
+                if overflow > char_px * 2.5:
                     break
-        remainder_words = words[len(" ".join(lines + [current]).split()):]
-        if remainder_words:
-            tail = f"{current} {' '.join(remainder_words)}".strip()
-            current = tail
-        lines.append(current)
+                fill_ratio = min(1.25, width_px / max(1.0, line_limit_px))
+                short_penalty = abs(0.90 - fill_ratio) * 85.0
+                if fill_ratio < 0.58:
+                    short_penalty += (0.58 - fill_ratio) * 170.0
+                if end == index:
+                    short_penalty += 14.0
+
+                next_score, next_lines = solve(end + 1, lines_left - 1)
+                score = short_penalty + overflow * 1000.0 + next_score
+                if score < best_score:
+                    best_score = score
+                    best_lines = [" ".join(current_words)] + next_lines
+
+            return best_score, best_lines
+
+        _, lines = solve(0, max_lines)
+        lines = [line.strip() for line in lines if line.strip()]
+        if not lines:
+            return [text]
         if len(lines) > max_lines:
             lines = lines[:max_lines]
-        if len(lines) == max_lines and len(" ".join(lines).split()) < len(words):
-            last = lines[-1]
-            lines[-1] = (last[: max(0, capacity - 3)].rstrip() + "...") if len(last) > capacity - 3 else last
+        total_words_in_lines = len(" ".join(lines).split())
+        if len(lines) == max_lines and total_words_in_lines < len(words):
+            remainder = words[total_words_in_lines:]
+            if remainder:
+                merged = f"{lines[-1]} {' '.join(remainder)}".strip()
+                max_chars = max(8, int(line_limit_px / max(1.0, char_px)))
+                lines[-1] = (merged[: max(0, max_chars - 3)].rstrip() + "...") if len(merged) > max_chars else merged
         return lines
 
     def _build_multiline_text(
@@ -476,13 +577,15 @@ Return raw SVG only."""
 Return JSON only with keys headline, support, secondary.
 Requirements:
 - headline: one clear takeaway, 3-10 words, complete and understandable
-- support: one complete explanation sentence, <= 18 words
-- secondary: optional second complete sentence, <= 14 words
+- support: one complete explanation sentence, <= 16 words
+- secondary: always empty for normal text overlays
 - keep the meaning faithful to the transcript
 - do not invent entities, slogans, taglines, or cryptic labels
 - avoid fragments like 'PLAY -> UNDERSTAND'
 - avoid category words like INSIGHT, NOTE, OBSERVATION
 - prefer conclusion-plus-explanation wording over decorative poster wording
+- prefer exactly 2 textual layers only: headline + support
+- do not create extra notes, follow-up lines, or alternative phrasings
 
 Transcript:
 {transcript}
@@ -497,9 +600,12 @@ Transcript:
                 support = str(data.get('support', '')).strip()
                 secondary = str(data.get('secondary', '')).strip()
                 if headline and support:
+                    if mode != "mechanism":
+                        secondary = ""
+                        support = self._clean_copy(support, 90)
                     return {
                         'headline': self._clean_copy(headline, 64),
-                        'support': self._clean_copy(support, 120),
+                        'support': self._clean_copy(support, 90),
                         'secondary': self._clean_copy(secondary, 100),
                     }
         except Exception as e:
@@ -565,24 +671,39 @@ Transcript:
         primary = design.get("recommended_accent", "#4f7cac")
         secondary = design.get("recommended_secondary", "#9fc2e4")
         text_color = design.get("recommended_text", "#f7fbff")
-        bg_color = design.get("recommended_bg", "#122238")
-        border_color = design.get("recommended_border", bg_color)
-        bg_opacity = design.get("svg_bg_opacity", 0.86)
-        bg_color = design.get("recommended_bg", "#122238")
-        border_color = design.get("recommended_border", bg_color)
-        bg_opacity = design.get("svg_bg_opacity", 0.86)
+        bg_color = design.get("recommended_bg", "none")
+        border_color = design.get("recommended_border", "none")
+        bg_opacity = design.get("svg_bg_opacity", 0.0)
+        bg_color = design.get("recommended_bg", "none")
+        border_color = design.get("recommended_border", "none")
+        bg_opacity = design.get("svg_bg_opacity", 0.0)
         copy_pack = self._fallback_copy(transcript, payload, mode)
         title = copy_pack.get("headline") or self._derive_title(transcript, payload, mode)
         subtitle = copy_pack.get("support") or self._derive_subtitle(transcript, payload, mode)
 
-        inset = max(12, int(min(width, height) * 0.035))
-        pad_x = max(56, int(width * 0.09))
-        title_w = max(180, min(width - 2 * pad_x, int(len(title) * max(22, width // 36))))
-        subtitle_fs = max(24, min(46, width // 24))
-        title_fs = max(44, min(98, width // 16))
-        title_y = max(110, int(height * 0.34))
-        divider_y = title_y + max(22, int(title_fs * 0.28))
-        subtitle_y = divider_y + max(44, int(height * 0.16))
+        pad_x = max(44, int(width * 0.10))
+        title_fs = max(30, min(72, width // 18))
+        subtitle_fs = max(18, min(32, width // 30))
+        title_lines = self._wrap_text(title, width - 2 * pad_x, title_fs, max_lines=4)
+        subtitle_lines = self._wrap_text(subtitle, width - 2 * pad_x, subtitle_fs, max_lines=4)
+        while title_fs > 20:
+            title_lines = self._wrap_text(title, width - 2 * pad_x, title_fs, max_lines=4)
+            subtitle_lines = self._wrap_text(subtitle, width - 2 * pad_x, subtitle_fs, max_lines=4)
+            total_height = (
+                len(title_lines) * int(title_fs * 1.05) +
+                max(24, int(height * 0.08)) +
+                len(subtitle_lines) * int(subtitle_fs * 1.24)
+            )
+            if total_height <= int(height * 0.72):
+                break
+            title_fs -= 2
+            subtitle_fs = max(16, subtitle_fs - 1)
+        title_line_h = int(title_fs * 1.05)
+        subtitle_line_h = int(subtitle_fs * 1.24)
+        title_y = max(92, int(height * 0.24))
+        divider_y = title_y + title_line_h * max(1, len(title_lines)) + max(18, int(height * 0.06))
+        subtitle_y = divider_y + max(34, int(height * 0.12))
+        title_w = max(120, min(width - 2 * pad_x, int(max(len(line) for line in title_lines or [title]) * max(18, title_fs * 0.56))))
         return f"""<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
@@ -595,11 +716,9 @@ Transcript:
     </style>
   </defs>
   <g>
-    <rect x="0" y="0" width="{width}" height="{height}" rx="{max(20, int(min(width, height) * 0.09))}" fill="{bg_color}" fill-opacity="1" stroke="{border_color}" stroke-width="6" />
-    <rect x="{inset}" y="{inset}" width="{max(0, width - inset * 2)}" height="{max(0, height - inset * 2)}" rx="{max(14, int(min(width, height) * 0.07))}" fill="none" stroke="{primary}" stroke-opacity="0.22" stroke-width="1.6" />
-    <text x="{pad_x}" y="{title_y}" font-size="{title_fs}" font-weight="800" fill="{text_color}" class="fade-in title-text">{self._escape_xml(title)}</text>
+    {self._build_multiline_text(pad_x, title_y, title_fs, title_line_h, title_lines, text_color, '800', extra='class="fade-in title-text"')}
     <line x1="{pad_x}" y1="{divider_y}" x2="{pad_x + int(title_w * 0.72)}" y2="{divider_y}" stroke="{primary}" stroke-width="2.8" stroke-linecap="round" class="sweep-line" />
-    <text x="{pad_x}" y="{subtitle_y}" font-size="{subtitle_fs}" font-weight="600" fill="{text_color}" opacity="0.94" class="fade-in body-text">{self._escape_xml(subtitle)}</text>
+    {self._build_multiline_text(pad_x, subtitle_y, subtitle_fs, subtitle_line_h, subtitle_lines, text_color, '600', extra='opacity="0.94" class="fade-in body-text"')}
   </g>
 </svg>"""
 

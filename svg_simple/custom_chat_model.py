@@ -11,6 +11,7 @@ Custom ChatModel for LangGraph
 - glm-4.7
 - qwen系列
 - gpt4-o
+- [超低价]kimi-for-coding
 """
 import re
 from typing import Any, Dict, Iterator, List, Optional, Union
@@ -23,6 +24,8 @@ from openai import OpenAI
 import os
 import json
 import base64
+import requests
+import time
 
 
 class CustomChatModel(BaseChatModel):
@@ -35,9 +38,11 @@ class CustomChatModel(BaseChatModel):
     max_tokens: int = 8000
     glm_max_tokens: int = 20000
     claude_max_tokens: int = 16000
+    llama_max_tokens: int = 7800
     streaming: bool = False
     client: Any = Field(default=None, exclude=True)
     use_developer_role: bool = False 
+    anthropic_base_url: Optional[str] = None
 
     def __init__(self, llm_type: str = "deepseek-v3", temperature: float = 0.7, **kwargs):
         super().__init__(**kwargs)
@@ -45,6 +50,7 @@ class CustomChatModel(BaseChatModel):
         self.temperature = temperature
         self.streaming = False
         self.use_developer_role = False
+        self.anthropic_base_url = None
         
         # 默认超时时间（秒）
         DEFAULT_TIMEOUT = 600.0 
@@ -53,6 +59,13 @@ class CustomChatModel(BaseChatModel):
             self.client = OpenAI(
                 timeout=DEFAULT_TIMEOUT
             )
+        # elif llm_type in ["gemini-3.1-pro-high", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-5.3-codex", "gemini-3.1-pro-low"]:
+        #     self.client = OpenAI(
+        #         api_key=os.getenv("REN_API_KEY"),
+        #         base_url="https://llm.whitedream.top/v1",
+        #         timeout=DEFAULT_TIMEOUT
+        #     )
+        #     self.streaming = True
         elif llm_type in ["gemini-3.1-pro-high", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-5.3-codex", "gemini-3.1-pro-low"]:
             self.client = OpenAI(
                 api_key=os.getenv("XIAOCHI_API_KEY"),
@@ -69,13 +82,11 @@ class CustomChatModel(BaseChatModel):
                 timeout=DEFAULT_TIMEOUT
             )
             self.streaming = True
-        elif llm_type == "gpt-5.4":
-            self.client = OpenAI(
-                api_key=os.getenv("CL_API_KET"),
-                base_url=" https://gpt-agent.cc/v1",
-                timeout=DEFAULT_TIMEOUT
-            )
-            self.streaming = True
+            
+        elif llm_type in ["gpt-5.4","gemini-3.1-pro"]:
+            self.client = None
+            self.anthropic_base_url = os.getenv("CL_BASE_URL", "https://gpt-agent.cc/v1").strip().rstrip("/")
+            self.streaming = False
         # elif llm_type == "kimi-k2.5":
         #     self.client = OpenAI(
         #         api_key=os.getenv("PLAN_API_KEY"),
@@ -83,6 +94,16 @@ class CustomChatModel(BaseChatModel):
         #         timeout=DEFAULT_TIMEOUT
         #     )
         #     self.streaming = True
+        elif llm_type == "[超低价]kimi-for-coding":
+            self.client = OpenAI(
+                api_key=(
+                    os.getenv("WHITE_DREAM_API_KEY")
+                    or os.getenv("REN_API_KEY")
+                ),
+                base_url=os.getenv("WHITE_DREAM_BASE_URL", "https://llm.whitedream.top/v1"),
+                timeout=DEFAULT_TIMEOUT
+            )
+            self.streaming = False
         elif llm_type == "kimi-k2.5":
             self.client = OpenAI(
                 api_key=os.getenv("DY_API_KEY"),
@@ -120,6 +141,12 @@ class CustomChatModel(BaseChatModel):
             self.streaming = True
         
         elif llm_type == "claude-sonnet-4-5-20250929":
+            self.client = OpenAI(
+                api_key=os.getenv("OPENAI_API_KEY_YI"),
+                base_url="http://api.apiyi.com/v1",
+                timeout=DEFAULT_TIMEOUT
+            )
+        elif llm_type == "llama-3-1-8b-instruct":
             self.client = OpenAI(
                 api_key=os.getenv("OPENAI_API_KEY_YI"),
                 base_url="http://api.apiyi.com/v1",
@@ -244,6 +271,12 @@ class CustomChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         """生成响应"""
+        if self.llm_type in ["gpt-5.4","gemini-3.1-pro"]:
+            content = self._call_anthropic_api(messages)
+            message = AIMessage(content=content)
+            generation = ChatGeneration(message=message)
+            return ChatResult(generations=[generation])
+
         # 检查是否包含多模态消息
         has_vision_content = any(
             isinstance(msg.content, list) and any(
@@ -275,7 +308,7 @@ class CustomChatModel(BaseChatModel):
                 top_p=self.top_p,
             )
             return response.choices[0].message.content
-        elif self.llm_type in ["deepseek-chat", "deepseek-v3", "gemini-3.1-pro-high", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-5.3-codex", "gemini-3.1-pro-low"]:
+        elif self.llm_type in ["deepseek-chat", "deepseek-v3", "gemini-3.1-pro-high", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-5.3-codex", "gemini-3.1-pro-low", "[超低价]kimi-for-coding"]:
             if not self.streaming:
                 response = self.client.chat.completions.create(
                     model=self.llm_type,
@@ -287,14 +320,8 @@ class CustomChatModel(BaseChatModel):
             else:
                 return self._stream_response(self.llm_type, input_messages)
 
-        elif self.llm_type == "gpt-5.4":
-            response = self.client.chat.completions.create(
-                model=self.llm_type,
-                messages=input_messages,
-                top_p=self.top_p,
-                max_tokens=self.claude_max_tokens
-            )
-            return response.choices[0].message.content
+        elif self.llm_type in ["gpt-5.4","gemini-3.1-pro"]:
+            return self._call_anthropic_api_from_dicts(input_messages)
         elif self.llm_type == "glm-5":
             response = self.client.chat.completions.create(
                 model=self.llm_type,
@@ -373,6 +400,14 @@ class CustomChatModel(BaseChatModel):
                 max_tokens=self.claude_max_tokens
             )
             return response.choices[0].message.content
+        elif self.llm_type == "llama-3-1-8b-instruct":
+            response = self.client.chat.completions.create(
+                model=self.llm_type,
+                messages=input_messages,
+                top_p=self.top_p,
+                max_tokens=self.llama_max_tokens
+            )
+            return response.choices[0].message.content
         
         elif "qwen" in self.llm_type:
             if not self.streaming:
@@ -419,6 +454,168 @@ class CustomChatModel(BaseChatModel):
                     answer_content += delta.content
         
         return answer_content
+
+    def _convert_messages_anthropic(self, messages: List[BaseMessage]) -> Dict[str, Any]:
+        """转换消息格式为 Anthropic messages API 格式"""
+        system_parts: List[str] = []
+        converted: List[Dict[str, Any]] = []
+
+        for msg in messages:
+            if isinstance(msg, SystemMessage):
+                if msg.content:
+                    system_parts.append(str(msg.content))
+                continue
+
+            if isinstance(msg, HumanMessage):
+                converted.append({
+                    "role": "user",
+                    "content": self._convert_content_to_anthropic_blocks(msg.content),
+                })
+            elif isinstance(msg, AIMessage):
+                converted.append({
+                    "role": "assistant",
+                    "content": self._convert_content_to_anthropic_blocks(msg.content, allow_images=False),
+                })
+
+        return {
+            "system": "\n\n".join(part for part in system_parts if part),
+            "messages": converted,
+        }
+
+    def _convert_content_to_anthropic_blocks(self, content: Any, allow_images: bool = True) -> List[Dict[str, Any]]:
+        """将文本/多模态内容转换为 Anthropic content blocks"""
+        if isinstance(content, str):
+            return [{"type": "text", "text": content}]
+
+        if not isinstance(content, list):
+            return [{"type": "text", "text": str(content)}]
+
+        blocks: List[Dict[str, Any]] = []
+        for part in content:
+            if not isinstance(part, dict):
+                blocks.append({"type": "text", "text": str(part)})
+                continue
+
+            part_type = part.get("type")
+            if part_type == "text":
+                blocks.append({"type": "text", "text": part.get("text", "")})
+                continue
+
+            if not allow_images:
+                continue
+
+            if part_type == "image":
+                source = part.get("source", {})
+                if source:
+                    blocks.append({
+                        "type": "image",
+                        "source": {
+                            "type": source.get("type", "base64"),
+                            "media_type": source.get("media_type", "image/png"),
+                            "data": source.get("data", ""),
+                        }
+                    })
+                continue
+
+            if part_type == "image_url":
+                image_url = part.get("image_url", {}).get("url", "")
+                parsed = self._parse_data_url_image(image_url)
+                if parsed:
+                    media_type, data = parsed
+                    blocks.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": data,
+                        }
+                    })
+
+        if not blocks:
+            blocks.append({"type": "text", "text": ""})
+        return blocks
+
+    def _parse_data_url_image(self, url: str) -> Optional[tuple]:
+        """解析 data URL，提取媒体类型和 base64 数据"""
+        if not url.startswith("data:") or ";base64," not in url:
+            return None
+
+        header, data = url.split(",", 1)
+        media_type = header[5:].split(";")[0] or "image/png"
+        return media_type, data
+
+    def _call_anthropic_api(self, messages: List[BaseMessage]) -> str:
+        """使用 Anthropic messages API 调用 gpt-5.4"""
+        payload = self._convert_messages_anthropic(messages)
+        return self._post_anthropic_payload(payload)
+
+    def _call_anthropic_api_from_dicts(self, input_messages: List[Dict]) -> str:
+        """兼容旧调用路径的 Anthropic API 包装"""
+        system_parts: List[str] = []
+        converted: List[Dict[str, Any]] = []
+
+        for msg in input_messages:
+            role = msg.get("role")
+            content = msg.get("content", "")
+            if role in ["system", "developer"]:
+                if content:
+                    system_parts.append(str(content))
+                continue
+            if role in ["user", "assistant"]:
+                converted.append({
+                    "role": role,
+                    "content": self._convert_content_to_anthropic_blocks(
+                        content,
+                        allow_images=(role == "user")
+                    ),
+                })
+
+        payload = {
+            "system": "\n\n".join(part for part in system_parts if part),
+            "messages": converted,
+        }
+        return self._post_anthropic_payload(payload)
+
+    def _post_anthropic_payload(self, payload: Dict[str, Any]) -> str:
+        api_key = os.getenv("CL_API_KET")
+        if not api_key:
+            raise ValueError("CL_API_KET environment variable is not set")
+
+        base_url = (self.anthropic_base_url or os.getenv("CL_BASE_URL", "https://gpt-agent.cc/v1")).strip().rstrip("/")
+        message_count = len(payload.get("messages", []))
+        prompt_chars = len(json.dumps(payload, ensure_ascii=False))
+        print(f"  [Anthropic:{self.llm_type}] POST {base_url}/messages (messages={message_count}, payload_chars={prompt_chars})")
+        started_at = time.time()
+        response = requests.post(
+            f"{base_url}/messages",
+            headers={
+                "content-type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            json={
+                "model": self.llm_type,
+                "max_tokens": self.claude_max_tokens,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                **payload,
+            },
+            timeout=600,
+        )
+        elapsed = time.time() - started_at
+        print(f"  [Anthropic:{self.llm_type}] status={response.status_code} elapsed={elapsed:.2f}s")
+        response.raise_for_status()
+
+        data = response.json()
+        contents = data.get("content", [])
+        texts = [
+            item.get("text", "")
+            for item in contents
+            if isinstance(item, dict) and item.get("type") == "text"
+        ]
+        text = "".join(texts).strip()
+        print(f"  [Anthropic:{self.llm_type}] text_chars={len(text)}")
+        return text
 
     def parse_json_response(self, content: Any) -> Union[Dict, list]:
         """
@@ -501,6 +698,9 @@ class CustomChatModel(BaseChatModel):
         """
         构建多模态消息，根据模型类型选择合适的格式
         """
+        if self.llm_type in ["gpt-5.4","gemini-3.1-pro"]:
+            return self.create_vision_message_anthropic(prompt_text, image_path)
+
         # 如果是GLM-4.6V，使用专门的方法
         if self.llm_type == "glm-4.6v":
             return self.create_vision_message_glm4v(prompt_text, image_path)
@@ -534,6 +734,38 @@ class CustomChatModel(BaseChatModel):
             ])
         except Exception as e:
             print(f"⚠️ [Vision] Error constructing message: {e}")
+            return HumanMessage(content=f"Error analyzing image: {str(e)}. Prompt: {prompt_text}")
+
+    def create_vision_message_anthropic(self, prompt_text: str, image_path: Optional[str]) -> HumanMessage:
+        """
+        为 Anthropic messages API 构建多模态消息
+        """
+        try:
+            if not image_path or not os.path.exists(image_path):
+                print("⚠️ [Anthropic Vision] No image found, falling back to text only.")
+                return HumanMessage(content=prompt_text)
+
+            with open(image_path, "rb") as image_file:
+                b64_img = base64.b64encode(image_file.read()).decode("utf-8")
+
+            media_type = self._get_media_type(image_path)
+
+            return HumanMessage(content=[
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": b64_img,
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": prompt_text
+                }
+            ])
+        except Exception as e:
+            print(f"⚠️ [Anthropic Vision] Error constructing message: {e}")
             return HumanMessage(content=f"Error analyzing image: {str(e)}. Prompt: {prompt_text}")
 
     def create_vision_message_glm4v(self, prompt_text: str, image_path: Optional[str]) -> HumanMessage:
@@ -586,7 +818,7 @@ class CustomChatModel(BaseChatModel):
             "qwen-vl-plus",
             "qwen-vl-max",
             "claude-sonnet-4-5-20250929",
-            "qwen3.5-plus","kimi-k2.5","gpt-5.4",
+            "qwen3.5-plus","kimi-k2.5","gpt-5.4","gemini-3.1-pro",
              "gemini-3.1-pro-high", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-5.3-codex", "gemini-3.1-pro-low"
         ]
         return any(vm in self.llm_type.lower() for vm in vision_models)

@@ -74,7 +74,7 @@ class VisualStrategy:
 
         # Colors — base values from scene_agent design_guide
         bg_color = region_ctx.get("region_bg_color",
-                    design_guide.get("recommended_bg", "#0d1117"))
+                    design_guide.get("recommended_bg", "none"))
         accent_color = design_guide.get("recommended_accent", "#58a6ff")
         text_color = region_ctx.get("contrast_text_color",
                      design_guide.get("recommended_text", "#e6edf3"))
@@ -88,14 +88,7 @@ class VisualStrategy:
             region_brightness = region_ctx.get("region_brightness_value",
                 {"dark": 40, "medium": 128, "bright": 200}.get(str(raw_brightness), 50))
         region_type = region_ctx.get("region_type", "solid")
-        bg_opacity = region_ctx.get("svg_bg_opacity",
-                    region_ctx.get("recommended_svg_opacity", 0.92))
-        
-        if isinstance(bg_opacity, (int, float)):
-            bg_opacity = max(0.75, min(0.98, float(bg_opacity)))
-
-        if isinstance(region_brightness, (int, float)) and region_brightness < 30:
-            bg_color = "#1e293b"
+        bg_opacity = 0.0
 
         frame_count = scene_context.get("frame_count", 0)
         is_scene_fallback = (accent_color == "#3498db" and frame_count == 0)
@@ -120,6 +113,11 @@ class VisualStrategy:
         svg_prompt = design_guide.get("svg_prompt", "")
         scene_description = design_guide.get("scene_description", "")
         position = layout_context.get("position", "center")
+        target_width = int(layout_context.get("width", 640) or 640)
+        target_height = int(layout_context.get("height", 360) or 360)
+        min_title_font = max(88, min(132, int(target_width * 0.145)))
+        min_body_font = max(56, min(84, int(target_width * 0.090)))
+        min_caption_font = min_body_font
 
         # ── 2. Build context summary for LLM ───────────────────────
         context_block = self._build_context_block(
@@ -133,13 +131,18 @@ class VisualStrategy:
             svg_prompt=svg_prompt,
             scene_description=scene_description,
             position=position,
+            target_width=target_width,
+            target_height=target_height,
+            min_title_font=min_title_font,
+            min_body_font=min_body_font,
+            min_caption_font=min_caption_font,
             motion_context=motion_context,
             visual_description=visual_description,
         )
 
         # ── 3. LLM call — distill + align + classify type ─────────
         try:
-            brief = self._llm_create_brief(text_input, context_block)
+            brief = self._llm_create_brief(text_input, context_block, motion_context=motion_context)
         except Exception as e:
             print(f"  [VisualStrategy] LLM failed: {e}, using fallback")
             brief = self._fallback_brief(text_input)
@@ -151,14 +154,21 @@ class VisualStrategy:
 
         # ── 5. Inject hard color values ────────────────────────────
         brief["color_instructions"] = {
-            "background": bg_color,
-            "border": design_guide.get("recommended_border", accent_color),
+            "background": "none",
+            "border": "none",
             "primary_accent": accent_color,
             "secondary_accent": secondary_color,
             "text": text_color,
             "bg_opacity": bg_opacity,
             "region_brightness": region_brightness,
             "region_type": region_type,
+        }
+        brief["target_render"] = {
+            "width": target_width,
+            "height": target_height,
+            "min_title_font": min_title_font,
+            "min_body_font": min_body_font,
+            "min_caption_font": min_caption_font,
         }
 
         print(f"    ✓ Visual type: {brief.get('visual_type', 'N/A')}")
@@ -215,22 +225,30 @@ class VisualStrategy:
 
         rtype = kwargs.get("region_type", "solid")
         if rtype == "complex":
-            lines.append("Region is COMPLEX/BUSY — use higher opacity background, keep SVG simple")
+            lines.append("Region is COMPLEX/BUSY — keep SVG simple and rely on visible text/icon colors instead of a background plate")
         elif rtype == "gradient":
-            lines.append("Region has GRADIENT — use semi-transparent background")
+            lines.append("Region has GRADIENT — maintain transparency and use stable high-contrast text/icon colors")
         else:
-            lines.append("Region is CLEAN/SOLID — can use lower opacity, more visual detail")
+            lines.append("Region is CLEAN/SOLID — keep the background transparent and focus on clear colored entities")
 
         lines.append(f"Available colors: bg={kwargs.get('bg_color')}, "
                      f"primary={kwargs.get('accent_color')}, "
                      f"secondary={kwargs.get('secondary_color')}, "
                      f"text={kwargs.get('text_color')}")
+        lines.append(
+            "Target render region: "
+            f"{kwargs.get('target_width')}x{kwargs.get('target_height')} px; "
+            f"title >= {kwargs.get('min_title_font')} px, "
+            f"supporting text >= {kwargs.get('min_body_font')} px. "
+            f"Use only two font scales total."
+        )
 
         return "\\n".join(lines)
 
-    def _llm_create_brief(self, text_input: str, context_block: str) -> Dict:
+    def _llm_create_brief(self, text_input: str, context_block: str, motion_context: Optional[Dict] = None) -> Dict:
         self._ensure_llm()
         from langchain_core.messages import SystemMessage, HumanMessage
+        motion_context = motion_context or {}
 
         system_prompt = """You are a visual brief writer for educational SVG overlays.
 
@@ -253,7 +271,8 @@ Return JSON only with this schema:
   "style_directive": "art direction in one sentence",
   "animation_intent": "high | light",
   "animation_notes": "what should move, reveal, pulse, orbit, flow, or shimmer",
-  "scene_alignment": "how it should blend with the video scene"
+  "scene_alignment": "how it should blend with the video scene",
+  "font_plan": "how large the title and supporting text should be using only two font sizes"
 }
 """
 
@@ -267,6 +286,10 @@ SUBTITLE TEXT:
 IMPORTANT:
 - Do not just extract random words from the subtitle.
 - key_elements must be meaningful concepts, objects, stages, or entities.
+- The SVG will be scaled down into a video overlay, so decide the font sizes first and keep them large.
+- Use only two font sizes total: one dominant size and one supporting size.
+- Do not create a third tiny annotation tier.
+- If text becomes too small, reduce the number of elements instead of shrinking fonts below readable size.
 - If the segment is suitable for strong explanatory animation, set animation_intent to "high".
 - Otherwise set animation_intent to "light" and still suggest subtle motion.
 - Prefer a clean, expressive composition over generic labeled boxes.
@@ -331,6 +354,8 @@ Return JSON only."""
             parsed["animation_intent"] = "light"
         if not parsed.get("scene_alignment"):
             parsed["scene_alignment"] = "Blend with the frame colors while preserving strong readability."
+        if not parsed.get("font_plan"):
+            parsed["font_plan"] = "Use only two font sizes: a dominant title size and a large supporting size. Avoid tiny annotations."
 
         key_elements = parsed.get("key_elements", [])
         if isinstance(key_elements, list):
@@ -384,4 +409,5 @@ Return JSON only."""
             "animation_intent": "light",
             "animation_notes": "Add subtle fade-in, line-draw, and pulse motion.",
             "svg_mode": "static",
+            "font_plan": "Use only two font sizes: a dominant title size and a large supporting size.",
         }

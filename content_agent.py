@@ -229,6 +229,9 @@ class ContentAgent:
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         svg_content = f.read()
+                    if self._svg_has_nontransparent_background(svg_content):
+                        print(f"      [Cache] Opaque SVG background detected in {filename}, regenerating.")
+                        raise ValueError("legacy_svg_background_cache")
                     return {
                         'type': 'svg',
                         'path': f'temp_analysis/assets/svg/{filename}',
@@ -285,6 +288,13 @@ class ContentAgent:
         此处仅保留为了兼容性，不再进行强制字符串替换，以免破坏精心设计的调色板
         """
         return svg_content
+
+    def _svg_has_nontransparent_background(self, svg_content: str) -> bool:
+        raw = str(svg_content or "").lower()
+        return (
+            ('<rect' in raw and ('width="1920"' in raw or 'width="100%"' in raw) and ('height="1080"' in raw or 'height="100%"' in raw) and 'fill="none"' not in raw)
+            or 'fill-opacity="1"' in raw and '<rect' in raw and ('width="1920"' in raw or 'width="100%"' in raw)
+        )
     
     def _generate_fallback_svg(
         self,
@@ -302,10 +312,10 @@ class ContentAgent:
         height = layout_info.get('height', CANVAS_HEIGHT)
 
         design = scene_info.get('design_guide', {})
-        bg = design.get('recommended_bg', '#0a0a1a')
+        bg = design.get('recommended_bg', 'none')
         accent = design.get('recommended_accent', '#00f3ff')
-        border = design.get('recommended_border', accent)
-        bg_opacity = design.get('svg_bg_opacity', 0.86)
+        border = design.get('recommended_border', 'none')
+        bg_opacity = design.get('svg_bg_opacity', 0.0)
         
         safe_topic = topic[:30] if topic else "Info"
         cx = width // 2
@@ -318,8 +328,6 @@ class ContentAgent:
     .pulse {{ animation: pulse 2s ease-in-out infinite; }}
     .fade {{ animation: fadeIn 1s ease-out forwards; }}
   </style>
-  
-  <rect width="{width}" height="{height}" rx="28" fill="{bg}" fill-opacity="{bg_opacity}" stroke="{border}" stroke-width="3"/>
   
   <text x="{cx}" y="{cy - 50}" font-family="sans-serif" font-size="32" 
         fill="{accent}" text-anchor="middle" class="fade">
@@ -356,7 +364,7 @@ class ContentAgent:
         """
         timestamp = point['timestamp']
         prefix = 'mechanism' if mode == 'mechanism' else 'text'
-        version_tag = "v4"
+        version_tag = "v6"
         filename = f"{prefix}_{version_tag}_{idx}_{int(timestamp)}.svg"
         filepath = os.path.join(self.t2svg_dir, filename)
 

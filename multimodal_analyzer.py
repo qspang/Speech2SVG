@@ -20,6 +20,7 @@ from multimodal_utils import (
 # 导入各Agent
 from layout_agent import LayoutProcessor
 from decision_agent import DecisionAgent
+from placement_segment_agent import PlacementSegmentAgent
 from scene_agent import SceneAgent
 from content_agent import ContentAgent
 from concept_graph_agent import ConceptGraphAgent
@@ -69,6 +70,10 @@ class MultimodalAnalyzer:
             vision_llm_type=self.vision_llm_type,
             enable_print_layout=self.enable_print_layout,
         ) if video_path else None
+        self.placement_segment_agent = PlacementSegmentAgent(
+            video_path,
+            self.output_dir,
+        ) if video_path else None
         self.decision_agent = DecisionAgent(self.llm_type, self.vision_llm_type, self.output_dir)
         self.scene_agent = SceneAgent(
             video_path,
@@ -81,7 +86,7 @@ class MultimodalAnalyzer:
             self.llm_type,
             self.output_dir,
             max_workers=self.max_workers
-        )
+        ) if self.enable_concept_graph else None
         self.content_agent = ContentAgent(
             self.llm_type, 
             self.vision_llm_type, 
@@ -352,8 +357,18 @@ class MultimodalAnalyzer:
         decisions = self._apply_feature_flags_to_decisions(decisions, persist=not force_reprocess)
         
         print("\n" + "="*70)
-        print("PHASE 4: Layout with Saliency Detection")
+        print("PHASE 4: Placement Window Refinement + Layout")
         print("="*70)
+
+        if not self.placement_segment_agent:
+            self.placement_segment_agent = PlacementSegmentAgent(
+                self.video_path,
+                self.output_dir,
+            )
+        decisions = self.placement_segment_agent.refine_decisions(
+            decisions,
+            force=force_reprocess,
+        )
         
         # 调用LayoutProcessor
         if not self.layout_agent:
